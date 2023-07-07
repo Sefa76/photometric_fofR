@@ -5,7 +5,7 @@ Repository containing the Montepython f(R) likelihood for photometric probes.
 
 1. The folder
 
-    input/
+    inputs/
 
 contains the `.param` and `.ini` files to launch and execute MontePython MCMC runs for the f(R) models.
 
@@ -24,7 +24,7 @@ contains plots almost ready for publication.
 
 4. The folder
 
-    code/
+    codes/
 
 contains snippets of code for MP and for analysis.
 
@@ -40,4 +40,8 @@ Create a project folder to contain all needed dependencies, that will look after
          others/
 
 Read each of the individual `install.md` files for instructions
+
+## Running an MCMC
+
+Read the MP_run_MCMC.md file for instructions
 
