@@ -125,7 +125,7 @@ class euclid_photometric_z_fofr(Likelihood):
         
         if self.use_BCemu:
             self.nuisance += ['log10Mc']
-            self.nuiscance += ['nu_Mc']           
+            self.nuisance += ['nu_Mc']           
             self.bfcemu = BCemu.BCM_7param(verbose=False)
 
         ###########
@@ -249,35 +249,6 @@ class euclid_photometric_z_fofr(Likelihood):
 
     def loglkl(self, cosmo, data):
 
-        # check BCemu parameter space
-
-        if self.use_BCemu:
-            log10Mc = data.mcmc_parameters['log10Mc']['current'] * data.mcmc_parameters['log10Mc']['scale']
-            nu_Mc   = data.mcmc_parameters['nu_Mc']['current']   * data.mcmc_parameters['nu_Mc']['scale']
-            thej    = 3.5
-            nu_thej = 0.0
-            deta    = 0.2
-            nu_deta = 0.6
-            mu      = 1.0
-            nu_mu   = 0.0
-            gamma   = 2.5
-            nu_gamma= 0.0
-            delta   = 7.0
-            nu_delta= 0.0
-            eta     = 0.2
-            nu_eta  = 0.0
-
-            Ob = data.mcmc_parameters['Omega_b']['current'] * data.mcmc_parameters['Omega_b']['scale']
-            Om = data.mcmc_parameters['Omega_m']['current'] * data.mcmc_parameters['Omega_m']['scale']
-            fb = Ob/Om
-            if fb < 0.1 or fb > 0.25:
-                if self.verbose: print(" /!\ Skipping point because the baryon fraction is out of bounds!")
-                return -1e10
-
-            if log10Mc / 3**nu_Mc < 11 or log10Mc / 3**nu_Mc > 15 :
-                if self.verbose: print(" /!\ Skipping point because BF parameters are out of bounds!")
-                return -1e10
-
         # One wants to obtain here the relation between z and r, this is done
         # by asking the cosmological module with the function z_of_r
         self.r = np.zeros(self.nzmax, 'float64')
@@ -344,26 +315,28 @@ class euclid_photometric_z_fofr(Likelihood):
         for index_l, index_z in index_pknn:
             pk_m_nl[index_l, index_z] = Pk_nl(self.z[index_z],k[index_l,index_z])
             pk_m_l [index_l, index_z] = Pk_l (self.z[index_z],k[index_l,index_z])
+        
+        Pk = pk_m_nl
 
-        ##########
-        # Boosts #
-        #########
+        ########################
+        # Boosts and Emulators #
+        ########################   
+
         if self.use_fofR:
-            # Winther boost for f(R) is the only one implemented at the moment 
             lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
             f_R0=np.power(10,-1*lgfR0)
             boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
             boost_m_l_fofR  = np.zeros((self.lbin, self.nzmax), 'float64')
+
             for index_l, index_z in index_pknn:
                 boost_m_l_fofR [index_l, index_z]= pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h()) 
                 boost_m_nl_fofR[index_l, index_z]= pofk_enhancement       (self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h(),hasBug=self.use_bug)
 
-            if self.use_MGGrowth:
-                D_z_boost = np.ones((self.lbin,self.nzmax), 'float64')
-                for index_l, index_z in index_pknn:
-                    D_z_boost[index_l,index_z] = np.sqrt(pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h()) /\
-                                                         pofk_enhancement_linear(              0,f_R0,k[index_l,index_z]/cosmo.h()))
-
+            if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']):
+                data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
+        
+            Pk *= boost_m_nl_fofR
+ 
         if self.use_BCemu:
             # baryonic feedback modifications are only applied to k>kmin_bfc
             # it is very computationally expensive to call BCemu at every z in self.z, and it is a very smooth function with z,
@@ -371,49 +344,58 @@ class euclid_photometric_z_fofr(Likelihood):
             # splined over all z in self.z. For k>kmax_bfc = 12.5 h/Mpc, the maximum k the emulator is trained on, a constant
             # suppression in k is assumed: BFC(k,z) = BFC(12.5 h/Mpc, z).
 
+            log10Mc = data.mcmc_parameters['log10Mc']['current'] * data.mcmc_parameters['log10Mc']['scale']
+            nu_Mc   = data.mcmc_parameters['nu_Mc']['current']   * data.mcmc_parameters['nu_Mc']['scale']
+
+            bcemu_dict ={
+            'log10Mc' : log10Mc,
+            'nu_Mc'   : nu_Mc,
+            'mu'      : 0.93,
+            'nu_mu'   : 0.0,
+            'thej'    : 2.6, 
+            'nu_thej' : 0.0,
+            'gamma'   : 2.25,
+            'nu_gamma': 0.0,
+            'delta'   : 6.4,
+            'nu_delta': 0.0,
+            'eta'     : 0.15,
+            'nu_eta'  : 0.0,
+            'deta'    : 0.14,
+            'nu_deta' : 0.06
+            }
+            
+            Ob = cosmo.Omega_b()
+            Om = cosmo.Omega_m()            
+
+            fb = Ob/Om
+            if fb < 0.1 or fb > 0.25:
+                if self.verbose: print(" /!\ Skipping point because the baryon fraction is out of bounds!")
+                return -1e10
+
+            if log10Mc / 3**nu_Mc < 11 or log10Mc / 3**nu_Mc > 15 :
+                if self.verbose: print(" /!\ Skipping point because BF parameters are out of bounds!")
+                return -1e10
+
+            kmin_in_inv_Mpc = self.k_min_h_by_Mpc * cosmo.h()
             kmin_bfc = 0.035
             kmax_bfc = 12.5
             k_bfc = np.logspace(np.log10(max(kmin_bfc, self.k_min_h_by_Mpc)), np.log10(min(kmax_bfc, self.k_max_h_by_Mpc)), self.BCemu_k_bins)
             # ^ all have units h/Mpc
+
             z_bfc = np.linspace(self.z[0], min(2, self.z[-1]), self.BCemu_z_bins)
             BFC = np.zeros((self.BCemu_k_bins, self.BCemu_z_bins))
-
+    
             for index_z, z in enumerate(z_bfc):
-                BFC[:,index_z] = self.bfcemu.get_boost(
-                    z,
-                    {
-                    'log10Mc' : log10Mc , 
-                    'nu_Mc'   : nu_Mc   ,
-                    'thej'    : thej    ,
-                    'nu_thej' : nu_thej ,
-                    'deta'    : deta    ,
-                    'nu_deta' : nu_deta ,
-                    'mu'      : mu      ,
-                    'nu_mu'   : nu_mu   ,
-                    'gamma'   : gamma   ,
-                    'nu_gamma': nu_gamma,
-                    'delta'   : delta   ,
-                    'nu_delta': nu_delta,
-                    'eta'     : eta     ,
-                    'nu_eta'  : nu_eta  
-                    },
-                    k_bfc,
-                    cosmo.Omega_b()/cosmo.Omega_m())
-
+                BFC[:,index_z] = self.bfcemu.get_boost(z,bcemu_dict,k_bfc,fb)
+    
             BFC_interpolator = RectBivariateSpline(k_bfc*cosmo.h(), z_bfc, BFC)
-
+    
             boost_m_nl_BCemu = np.zeros((self.lbin, self.nzmax), 'float64')
+ 
             for index_z, z in enumerate(self.z):
-                boost_m_nl_BCemu[:, index_z] = BFC_interpolator(np.minimum(k,12.5*cosmo.h()),min(z, 2))[:,0]
+                boost_m_nl_BCemu[:, index_z] = BFC_interpolator(np.minimum(k[:,index_z],12.5*cosmo.h()),min(z, 2))[:,0]
        
-        Pk = pk_m_nl
-        if self.use_fofR:
-            Pk *= boost_m_nl_fofR 
-        if self.use_BCemu: 
             Pk *= boost_m_nl_BCemu
-
-        if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']) and self.use_fofR:
-            data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
 
         ####################
         # Get Growthfactor #
@@ -430,6 +412,10 @@ class euclid_photometric_z_fofr(Likelihood):
                 D_z[index_l,index_z] = np.sqrt(Pk_l(self.z[index_z],k[index_l,index_z])/Pk_l(0,k[index_l,index_z]))
 
         if self.use_fofR and self.use_MGGrowth:
+            D_z_boost = np.ones((self.lbin,self.nzmax), 'float64')
+            for index_l, index_z in index_pknn:
+                D_z_boost[index_l,index_z] = np.sqrt(pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h()) /\
+                                                     pofk_enhancement_linear(              0,f_R0,k[index_l,index_z]/cosmo.h()))
             D_z  *=  D_z_boost
 
         ################################################
@@ -698,7 +684,7 @@ class euclid_photometric_z_fofr(Likelihood):
             d_the = np.linalg.det(Cov_theory)
             d_obs = np.linalg.det(self.Cov_observ)    
             d_mix = np.zeros_like(d_the)
-            for i in xrange(2*self.nbin):
+            for i in range(2*self.nbin):
                 newCov = Cov_theory.copy()
                 newCov[:, i] = self.Cov_observ[:, :, i]
                 d_mix += np.linalg.det(newCov)
@@ -706,7 +692,7 @@ class euclid_photometric_z_fofr(Likelihood):
             d_the_high = np.linalg.det(Cov_theory_high)
             d_obs_high = np.linalg.det(self.Cov_observ_high)
             d_mix_high = np.zeros_like(d_the_high)
-            for i in xrange(self.nbin):
+            for i in range(self.nbin):
                 newCov = Cov_theory_high.copy()
                 newCov[:, i] = self.Cov_observ_high[:, :, i]
                 d_mix_high += np.linalg.det(newCov)
@@ -724,7 +710,7 @@ class euclid_photometric_z_fofr(Likelihood):
             d_the = np.linalg.det(Cov_theory)
             d_obs = np.linalg.det(self.Cov_observ) 
             d_mix = np.zeros_like(d_the)
-            for i in xrange(self.nbin):
+            for i in range(self.nbin):
                 newCov = np.copy(Cov_theory)
                 newCov[:, i] = self.Cov_observ[:, :, i]
                 d_mix += np.linalg.det(newCov)
@@ -737,7 +723,7 @@ class euclid_photometric_z_fofr(Likelihood):
             d_the = np.linalg.det(Cov_theory)
             d_obs = np.linalg.det(self.Cov_observ) 
             d_mix = np.zeros_like(d_the)
-            for i in xrange(self.nbin):
+            for i in range(self.nbin):
                 newCov = np.copy(Cov_theory)
                 newCov[:, i] = self.Cov_observ[:, :, i]
                 d_mix += np.linalg.det(newCov)
@@ -746,4 +732,5 @@ class euclid_photometric_z_fofr(Likelihood):
 
             chi2 += np.sum((2*ells_GC+1)*self.fsky*((d_mix/d_the)+np.log(d_the/d_obs)-N))
 
+        print("euclid photometric: chi2 = ",chi2)
         return -chi2/2.
