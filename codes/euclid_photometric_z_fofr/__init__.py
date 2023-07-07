@@ -20,9 +20,7 @@ from montepython.MGfit_Winther import pofk_enhancement ,pofk_enhancement_linear 
 try:
     import BCemu
 except:
-    #raise Exception ("Please install the BCemu package from https://github.com/sambit-giri/BCemu !")
-    print("Please install the BCemu package from https://github.com/sambit-giri/BCemu !")
-    pass 
+    raise Exception ("Please install the BCemu package from https://github.com/sambit-giri/BCemu !")
 
 import numpy as np
 import warnings
@@ -343,20 +341,29 @@ class euclid_photometric_z_fofr(Likelihood):
         pk_m_l  = np.zeros((self.lbin, self.nzmax), 'float64')
         index_pknn = np.array(np.where((k> kmin_in_inv_Mpc) & (k<kmax_in_inv_Mpc))).transpose()
         
+        for index_l, index_z in index_pknn:
+            pk_m_nl[index_l, index_z] = Pk_nl(self.z[index_z],k[index_l,index_z])
+            pk_m_l [index_l, index_z] = Pk_l (self.z[index_z],k[index_l,index_z])
+
+        ##########
+        # Boosts #
+        #########
         if self.use_fofR:
+            # Winther boost for f(R) is the only one implemented at the moment 
             lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
             f_R0=np.power(10,-1*lgfR0)
             boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
             boost_m_l_fofR  = np.zeros((self.lbin, self.nzmax), 'float64')
-        
-        for index_l, index_z in index_pknn:
-            pk_m_nl[index_l, index_z] = Pk_nl(self.z[index_z],k[index_l,index_z])
-            pk_m_l [index_l, index_z] = Pk_l (self.z[index_z],k[index_l,index_z])
-            if self.use_fofR:    
+            for index_l, index_z in index_pknn:
                 boost_m_l_fofR [index_l, index_z]= pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h()) 
                 boost_m_nl_fofR[index_l, index_z]= pofk_enhancement       (self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h(),hasBug=self.use_bug)
 
-            
+            if self.use_MGGrowth:
+                D_z_boost = np.ones((self.lbin,self.nzmax), 'float64')
+                for index_l, index_z in index_pknn:
+                    D_z_boost[index_l,index_z] = np.sqrt(pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h()) /\
+                                                         pofk_enhancement_linear(              0,f_R0,k[index_l,index_z]/cosmo.h()))
+
         if self.use_BCemu:
             # baryonic feedback modifications are only applied to k>kmin_bfc
             # it is very computationally expensive to call BCemu at every z in self.z, and it is a very smooth function with z,
@@ -423,10 +430,6 @@ class euclid_photometric_z_fofr(Likelihood):
                 D_z[index_l,index_z] = np.sqrt(Pk_l(self.z[index_z],k[index_l,index_z])/Pk_l(0,k[index_l,index_z]))
 
         if self.use_fofR and self.use_MGGrowth:
-            D_z_boost = np.ones((self.lbin,self.nzmax), 'float64')
-            for index_l, index_z in index_pknn:
-                D_z_boost[index_l,index_z] = np.sqrt(pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h()) /\
-                                                     pofk_enhancement_linear(              0,f_R0,k[index_l,index_z]/cosmo.h()))
             D_z  *=  D_z_boost
 
         ################################################
@@ -691,69 +694,56 @@ class euclid_photometric_z_fofr(Likelihood):
                 ells = ells_WL
             else:
                 ells = ells_GC
-            for index, ell in enumerate(ells):
 
-                if ell<=self.lmax_XC:
-                    det_theory = np.linalg.det(Cov_theory[index,:,:])
-                    det_observ = np.linalg.det(self.Cov_observ[index,:,:])
-                    if det_theory/det_observ <= 0. :
-                        print('l, det_theory, det_observ, ratio', ell, det_theory, det_observ, det_theory/det_observ)
+            d_the = np.linalg.det(Cov_theory)
+            d_obs = np.linalg.det(self.Cov_observ)    
+            d_mix = np.zeros_like(d_the)
+            for i in xrange(2*self.nbin):
+                newCov = Cov_theory.copy()
+                newCov[:, i] = self.Cov_observ[:, :, i]
+                d_mix += np.linalg.det(newCov)
 
-                    det_cross = 0.
-                    for i in range(2*self.nbin):
-                        newCov = np.copy(Cov_theory[index, :, :])
-                        newCov[:, i] = self.Cov_observ[index, :, i]
-                        det_cross += np.linalg.det(newCov)/det_theory
-                    #if index==2:
-                        #print('det_theory: ', det_theory)
-                        #print('det_observ: ', det_observ)
-                        #print('det_cross: ', det_cross)
-                    chi2 += (2.*ell+1.)*self.fsky*(det_cross + np.log(det_theory/det_observ) - 2*self.nbin)
+            d_the_high = np.linalg.det(Cov_theory_high)
+            d_obs_high = np.linalg.det(self.Cov_observ_high)
+            d_mix_high = np.zeros_like(d_the_high)
+            for i in xrange(self.nbin):
+                newCov = Cov_theory_high.copy()
+                newCov[:, i] = self.Cov_observ_high[:, :, i]
+                d_mix_high += np.linalg.det(newCov)
 
-                else:
-                    det_theory = np.linalg.det(Cov_theory_high[ell-self.lmax_XC-1,:,:])
-                    det_observ = np.linalg.det(self.Cov_observ_high[ell-self.lmax_XC-1,:,:])
-                    if det_theory/det_observ <= 0. :
-                        print('l, det_theory, det_observ, ratio', ell, det_theory, det_observ, det_theory/det_observ)
+            N =np.ones_like(ells)*2*self.nbin
+            N[np.where(ells>self.lmax_XC)] = self.nbin
 
-                    det_cross = 0.
-                    for i in range(self.nbin):
-                        newCov = np.copy(Cov_theory_high[ell-self.lmax_XC-1, :, :])
-                        newCov[:, i] = self.Cov_observ_high[ell-self.lmax_XC-1, :, i]
-                        det_cross += np.linalg.det(newCov)/det_theory
-                    #if index==2:
-                        #print('det_theory: ', det_theory)
-                        #print('det_observ: ', det_observ)
-                        #print('det_cross: ', det_cross)
+            d_the = np.concatenate([d_the,d_the_high])
+            d_obs = np.concatenate([d_obs,d_obs_high])
+            d_mix = np.concatenate([d_mix,d_mix_high])
 
-                    chi2 += (2.*ell+1.)*self.fsky*(det_cross + np.log(det_theory/det_observ) - self.nbin)
-
+            chi2 += np.sum((2*ells+1)*self.fsky*((d_mix/d_the)+np.log(d_the/d_obs)-N))
 
         elif 'WL' in self.probe:
-            for index, ell in enumerate(ells_WL):
-                det_theory = np.linalg.det(Cov_theory[index,:,:])
-                det_observ = np.linalg.det(self.Cov_observ[index,:,:])
+            d_the = np.linalg.det(Cov_theory)
+            d_obs = np.linalg.det(self.Cov_observ) 
+            d_mix = np.zeros_like(d_the)
+            for i in xrange(self.nbin):
+                newCov = np.copy(Cov_theory)
+                newCov[:, i] = self.Cov_observ[:, :, i]
+                d_mix += np.linalg.det(newCov)
 
-                det_cross = 0.
-                for i in range(self.nbin):
-                    newCov = np.copy(Cov_theory[index, :, :])
-                    newCov[:, i] = self.Cov_observ[index, :, i]
-                    det_cross += np.linalg.det(newCov)/det_theory
+            N =np.ones_like(ells_WL)*self.nbin
 
-                chi2 += (2.*ell+1.)*self.fsky*(det_cross + np.log(det_theory/det_observ) - self.nbin)
+            chi2 += np.sum((2*ells_WL+1)*self.fsky*((d_mix/d_the)+np.log(d_the/d_obs)-N))
 
         elif 'GCph' in self.probe:
-            for index, ell in enumerate(ells_GC):
-                det_theory = np.linalg.det(Cov_theory[index,:,:])
-                det_observ = np.linalg.det(self.Cov_observ[index,:,:])
+            d_the = np.linalg.det(Cov_theory)
+            d_obs = np.linalg.det(self.Cov_observ) 
+            d_mix = np.zeros_like(d_the)
+            for i in xrange(self.nbin):
+                newCov = np.copy(Cov_theory)
+                newCov[:, i] = self.Cov_observ[:, :, i]
+                d_mix += np.linalg.det(newCov)
 
-                det_cross = 0.
-                for i in range(self.nbin):
-                    newCov = np.copy(Cov_theory[index, :, :])
-                    newCov[:, i] = self.Cov_observ[index, :, i]
-                    det_cross += np.linalg.det(newCov)/det_theory
+            N =np.ones_like(ells_GC)*self.nbin
 
-                chi2 += (2.*ell+1.)*self.fsky*(det_cross + np.log(det_theory/det_observ) - self.nbin)
+            chi2 += np.sum((2*ells_GC+1)*self.fsky*((d_mix/d_the)+np.log(d_the/d_obs)-N))
 
-        print("euclid photometric: chi2 = ",chi2)
         return -chi2/2.
