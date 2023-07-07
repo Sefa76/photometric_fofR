@@ -43,5 +43,5 @@ Read each of the individual `install.md` files for instructions
 
 ## Running an MCMC
 
-Read the MP_run_MCMC.md file for instructions
+Read the run_MCMC_MP.md file for instructions
 

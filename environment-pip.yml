@@ -1,0 +1,15 @@
+name: montepythonjc6
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8
+  - pip>=19.0
+  - pip:
+    - cython
+    - numpy>=1.17
+    - scipy>=1.3
+    - jupyter>=1.0
+    - matplotlib>=3.1
+    - getdist>=1.1.3
+    - pyyaml
