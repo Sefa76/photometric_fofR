@@ -30,5 +30,14 @@ contains snippets of code for MP and for analysis.
 
 ## Installation
 
+Create a project folder to contain all needed dependencies, that will look after installation like this:
+
+     KPJC6/
+         photometric_fofR/
+         montepython/
+         class_public/
+         BCemu/
+         others/
+
 Read each of the individual `install.md` files for instructions
 
