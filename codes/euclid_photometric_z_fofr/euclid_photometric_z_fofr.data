@@ -72,12 +72,18 @@ euclid_photometric_z_fofr.scale_dependent_f = True
 euclid_photometric_z_fofr.bias_model = 'binned'
 
 #fofR fiting
-euclid_photometric_z_fofr.use_fofR = True
+euclid_photometric_z_fofr.use_fofR = 'Winther'
 euclid_photometric_z_fofr.use_bug = False
 euclid_photometric_z_fofr.use_MGGrowth = False
 
 # baryonic feedback
 euclid_photometric_z_fofr.verbose = True
-euclid_photometric_z_fofr.use_BCemu = True
+euclid_photometric_z_fofr.use_BCemu = False
 euclid_photometric_z_fofr.BCemu_k_bins = 200
 euclid_photometric_z_fofr.BCemu_z_bins = 20
+
+# model shift checks 
+euclid_photometric_z_fofr.fit_diffrent_data = False
+#########################
+euclid_photometric_z_fofr.model_use_fofR = 'Winther'
+euclid_photometric_z_fofr.model_use_BCemu= True

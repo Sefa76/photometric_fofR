@@ -188,6 +188,10 @@ class euclid_photometric_z_fofr(Likelihood):
                             for nl in range(l_high):
                                 self.Cov_observ_high[nl,Bin1,Bin2] = float(line)
                                 line = fid_file.readline()
+        else:
+            if self.fit_diffrent_data:
+                self.use_fofR = self.model_use_fofR
+                self.use_BCemu= self.model_use_BCemu
 
         return
 
@@ -228,6 +232,7 @@ class euclid_photometric_z_fofr(Likelihood):
         term4 =-c0*(1-f_out)*erf((0.707107*(z-zb-cb*self.z_bin_edge[bin    ]))/(sigma_b*(1+z)))
         return (term1+term2+term3+term4)/(2*c0*cb)
 
+    #TODO make pk enhancement model dependant
     def get_sigma8_fofR(self,k,Pk,h,lgfR0):
         
         x = k*8/h
@@ -322,7 +327,7 @@ class euclid_photometric_z_fofr(Likelihood):
         # Boosts and Emulators #
         ########################   
 
-        if self.use_fofR:
+        if self.use_fofR == 'Winther':
             lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
             f_R0=np.power(10,-1*lgfR0)
             boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
