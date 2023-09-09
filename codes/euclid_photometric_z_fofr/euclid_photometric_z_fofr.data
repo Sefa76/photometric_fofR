@@ -14,7 +14,7 @@ euclid_photometric_z_fofr.fiducial_file  = "euclid_xc_fiducial_fofr.dat"
 
 #evaluated probes. Choose from ['WL','GCph','WL_GCph_XC']
 euclid_photometric_z_fofr.probe = ['WL_GCph_XC']
-#euclid_photometric_z_fofr.probe = ['WL']
+# euclid_photometric_z_fofr.probe = ['WL']
 # euclid_photometric_z_fofr.probe = ['GCph']
 
 # evaluated l-values

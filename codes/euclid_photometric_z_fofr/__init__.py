@@ -20,7 +20,8 @@ from montepython.MGfit_Winther import pofk_enhancement ,pofk_enhancement_linear 
 try:
     import BCemu
 except:
-    raise Exception ("Please install the BCemu package from https://github.com/sambit-giri/BCemu !")
+    print("Please install the BCemu package from https://github.com/sambit-giri/BCemu !")
+    pass
 
 import numpy as np
 import warnings
@@ -461,6 +462,53 @@ class euclid_photometric_z_fofr(Likelihood):
                 W_G = np.zeros((self.nzmax, self.nbin), 'float64')
                 W_G =  (H_z * self.biasfunc(self.z))[:,None] * self.eta_z
 
+        ###########
+        # Calc Cl #
+        ###########
+        # dimensionless
+
+        nell_WL = len(self.l_WL)
+        nell_GC = len(self.l_GC)
+        nell_XC = len(self.l_XC)
+
+        # the indices are ell, z, bin_i, bin_j in the int and ell, bin_i, bin_j in the Ceeell
+        if 'WL' in self.probe or 'WL_GCph_XC' in self.probe:
+            Cl_LL_int = W_L[:,:,:,None] * W_L[:,:,None,:] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None]
+            Cl_LL     = trapz(Cl_LL_int,self.z,axis=1)[:nell_WL,:,:]
+
+        if 'GCph' in self.probe or 'WL_GCph_XC' in self.probe:
+            Cl_GG_int = W_G[None,:,:,None] * W_G[None,: , None, :] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None]
+            Cl_GG     = trapz(Cl_GG_int,self.z,axis=1)[:nell_GC,:,:]
+
+        if 'WL_GCph_XC' in self.probe:
+            Cl_LG_int = W_L[:,:,:,None] * W_G[None,: , None, :] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None]
+            Cl_LG     = trapz(Cl_LG_int,self.z,axis=1)[:nell_XC,:,:]
+            Cl_GL     = np.transpose(Cl_LG,(0,2,1))
+
+        ####################
+        # Plot Pk and Cl's #
+        ####################
+        
+        # do you want to save the powerspectrum?
+        Plot_debug = False
+        if Plot_debug == True:
+            debug_file_path = os.path.join( self.data_directory, 'euclid_photometric_Pkz.npz')
+            # loading the file yields P(k,z), k(ell,z), z
+            np.savez(debug_file_path,Pkz=Pk,k=k,z=self.z)
+            print("Printed P(k,z)")
+
+        # do you want to save the Ceeell?
+        Plot_debug = False
+        if Plot_debug == True:
+            debug_file_path = os.path.join(self.data_directory, 'euclid_photometric_Cls.npz')
+            # loading the file yields 3-D matrix Cl_XY[ell,bin i,bin j] and ells_XY
+            if 'WL_GCph_XC' in self.probe:
+                np.savez(debug_file_path, ells_LL=self.l_WL, ells_GG=self.l_GC, ells_GL=self.l_XC, Cl_LL = Cl_LL, Cl_GG = Cl_GG, Cl_GL = Cl_GL)
+            if 'WL' in self.probe:
+                np.savez(debug_file_path, ells_LL=self.l_WL, Cl_LL = Cl_LL)
+            if 'GCph' in self.probe:
+                np.savez(debug_file_path, ells_GG=self.l_GC, Cl_GG = Cl_GG)
+
         ##########
         # Noise
         ##########
@@ -471,83 +519,16 @@ class euclid_photometric_z_fofr(Likelihood):
            'LG': 0.,
            'GL': 0.,
            'GG': 1./self.n_bar}
-
-        ###########
-        # Calc Cl #
-        ###########
-        # dimensionless
-
-        nell_WL = len(self.l_WL)
-        nell_GC = len(self.l_GC)
-        nell_XC = len(self.l_XC)
-
-        if 'WL' in self.probe or 'WL_GCph_XC' in self.probe:
-            Cl_LL_int = W_L[:,:,:,None] * W_L[:,:,None,:] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None]
-            Cl_LL     = trapz(Cl_LL_int,self.z,axis=1)[:nell_WL,:,:]
-            for i in range(self.nbin):
+        
+        # add noise to Ceeells after saving to better compare
+        for i in range(self.nbin):
+            if 'WL' in self.probe or 'WL_GCph_XC' in self.probe:
                 Cl_LL[:,i,i] += self.noise['LL']
-
-        if 'GCph' in self.probe or 'WL_GCph_XC' in self.probe:
-            Cl_GG_int = W_G[None,:,:,None] * W_G[None,: , None, :] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None]
-            Cl_GG     = trapz(Cl_GG_int,self.z,axis=1)[:nell_GC,:,:]
-            for i in range(self.nbin):
-                Cl_GG[:,i,i] += self.noise['GG']
-
-        if 'WL_GCph_XC' in self.probe:
-            Cl_LG_int = W_L[:,:,:,None] * W_G[None,: , None, :] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None]
-            Cl_LG     = trapz(Cl_LG_int,self.z,axis=1)[:nell_XC,:,:]
-            Cl_GL     = np.transpose(Cl_LG,(0,2,1))
-            for i in range(self.nbin):
-                Cl_LG[:,i,i] += self.noise['LG']
-                Cl_GL[:,i,i] += self.noise['GL']
-
-
-        #############
-        # Plot Cl's #
-        #############
-
-        Plot_debug = False
-        if Plot_debug == True:
-            Bin = 9
-            debug_file_path = os.path.join(
-                self.data_directory, 'z_Cl_'+str(Bin)+'.dat')
-            with open(debug_file_path, 'w') as debug_file:
-                for nl in range(len(self.l_XC)):
-                    debug_file.write("%g  %.16g  %.16g  %.16g  %.16g\n" % (l[nl],Cl_LL[nl,Bin,Bin],Cl_GG[nl,Bin,Bin],Cl_LG[nl,Bin,Bin],Cl_GL[nl,Bin,Bin]))
-            print("Printed Cl's")
-            exit()
-
-        Plot_debug = False
-        if Plot_debug == True:
-            if 'WL' in self.probe:
-                debug_file_path = os.path.join(self.data_directory, 'euclid_WLz_Cl_'+str(self.nzmax)+'.npy')
-                with open(debug_file_path, 'w') as debug_file:
-                    np.save(debug_file, Cl_LL)
-                debug_file_path = os.path.join(self.data_directory, 'euclid_WLz_ells.npy')
-                with open(debug_file_path, 'w') as debug_file:
-                    np.save(debug_file, self.l_WL)
+            if 'GCph' in self.probe or 'WL_GCph_XC' in self.probe:
+                Cl_GG[:,i,i] += self.noise['GG']    
             if 'WL_GCph_XC' in self.probe:
-                debug_file_path = os.path.join(self.data_directory, 'euclid_XCz_Cl_LL_'+str(self.nzmax)+'.npy')
-                with open(debug_file_path, 'w') as debug_file:
-                    np.save(debug_file, Cl_LL)
-                debug_file_path = os.path.join(self.data_directory, 'euclid_XCz_Cl_GG_'+str(self.nzmax)+'.npy')
-                with open(debug_file_path, 'w') as debug_file:
-                    np.save(debug_file, Cl_GG)
-                debug_file_path = os.path.join(self.data_directory, 'euclid_XCz_Cl_LG_'+str(self.nzmax)+'.npy')
-                with open(debug_file_path, 'w') as debug_file:
-                    np.save(debug_file, Cl_LG)
-                debug_file_path = os.path.join(self.data_directory, 'euclid_XCz_ells.npy')
-                with open(debug_file_path, 'w') as debug_file:
-                    np.save(debug_file, self.l_XC)
-            if 'GCph' in self.probe:
-                debug_file_path = os.path.join(self.data_directory, 'euclid_GCz_Cl_'+str(self.nzmax)+'.npy')
-                with open(debug_file_path, 'w') as debug_file:
-                    np.save(debug_file, Cl_GG)
-                debug_file_path = os.path.join(self.data_directory, 'euclid_GCz_ells.npy')
-                with open(debug_file_path, 'w') as debug_file:
-                    np.save(debug_file, self.l_GC)
-            exit()
-
+                Cl_GL[:,i,i] += self.noise['GL']
+                Cl_LG[:,i,i] += self.noise['LG'] 
 
         #############
         # Spline Cl #
