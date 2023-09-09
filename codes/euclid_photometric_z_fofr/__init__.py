@@ -15,7 +15,7 @@ from scipy.interpolate import interp1d, RectBivariateSpline
 
 import sys,os
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))
-from montepython.MGfit_Winther import pofk_enhancement ,pofk_enhancement_linear , kazuya_correktion 
+from montepython.MGfit_Winther import pofk_enhancement ,pofk_enhancement_linear , kazuya_correktion
 
 try:
     import BCemu
@@ -109,7 +109,7 @@ class euclid_photometric_z_fofr(Likelihood):
         if 'WL' in self.probe or 'WL_GCph_XC' in self.probe:
             self.nuisance += ['aIA', 'etaIA', 'betaIA']
 
-            # Read the file for the IA- contribution 
+            # Read the file for the IA- contribution
             lum_file = open(os.path.join(self.data_directory,'scaledmeanlum_E2Sa.dat'), 'r')
             content = lum_file.readlines()
             zlum = np.zeros((len(content)))
@@ -120,12 +120,12 @@ class euclid_photometric_z_fofr(Likelihood):
                 lum[index] = line.split()[1]
             self.lum_func = interp1d(zlum, lum,kind='linear')
 
-        if self.use_fofR == True:
+        if self.use_fofR != False:
             self.nuisance += ['lgfR0']
-        
+
         if self.use_BCemu:
             self.nuisance += ['log10Mc']
-            self.nuisance += ['nu_Mc']           
+            self.nuisance += ['nu_Mc']
             self.bfcemu = BCemu.BCM_7param(verbose=False)
 
         ###########
@@ -234,18 +234,18 @@ class euclid_photometric_z_fofr(Likelihood):
 
     #TODO make pk enhancement model dependant
     def get_sigma8_fofR(self,k,Pk,h,lgfR0):
-        
+
         x = k*8/h
         #Get Sigma windowfunktion
         W = 3 /np.power(x,3)*(np.sin(x)-x*np.cos(x))
         for ix, xi in enumerate(x):
             if xi<0.01:
                 W[ix]=1-xi**2/10
-        
+
         #Get fofR boost to linear spectrum
         fR0 = np.power(10,-lgfR0)
         Boost = np.array([pofk_enhancement_linear(0,fR0,ki/h) for ki in k])
-        
+
         Integr= np.power(k*W,2)*Pk*Boost/(2*np.pi**2)
         sigma8= np.sqrt(simpson( Integr, k)) * kazuya_correktion(lgfR0)
 
@@ -316,16 +316,16 @@ class euclid_photometric_z_fofr(Likelihood):
         pk_m_nl = np.zeros((self.lbin, self.nzmax), 'float64')
         pk_m_l  = np.zeros((self.lbin, self.nzmax), 'float64')
         index_pknn = np.array(np.where((k> kmin_in_inv_Mpc) & (k<kmax_in_inv_Mpc))).transpose()
-        
+
         for index_l, index_z in index_pknn:
             pk_m_nl[index_l, index_z] = Pk_nl(self.z[index_z],k[index_l,index_z])
             pk_m_l [index_l, index_z] = Pk_l (self.z[index_z],k[index_l,index_z])
-        
+
         Pk = pk_m_nl
 
         ########################
         # Boosts and Emulators #
-        ########################   
+        ########################
 
         if self.use_fofR == 'Winther':
             lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
@@ -334,14 +334,14 @@ class euclid_photometric_z_fofr(Likelihood):
             boost_m_l_fofR  = np.zeros((self.lbin, self.nzmax), 'float64')
 
             for index_l, index_z in index_pknn:
-                boost_m_l_fofR [index_l, index_z]= pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h()) 
+                boost_m_l_fofR [index_l, index_z]= pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h())
                 boost_m_nl_fofR[index_l, index_z]= pofk_enhancement       (self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h(),hasBug=self.use_bug)
 
             if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']):
                 data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
-        
+
             Pk *= boost_m_nl_fofR
- 
+
         if self.use_BCemu:
             # baryonic feedback modifications are only applied to k>kmin_bfc
             # it is very computationally expensive to call BCemu at every z in self.z, and it is a very smooth function with z,
@@ -357,7 +357,7 @@ class euclid_photometric_z_fofr(Likelihood):
             'nu_Mc'   : nu_Mc,
             'mu'      : 0.93,
             'nu_mu'   : 0.0,
-            'thej'    : 2.6, 
+            'thej'    : 2.6,
             'nu_thej' : 0.0,
             'gamma'   : 2.25,
             'nu_gamma': 0.0,
@@ -368,9 +368,9 @@ class euclid_photometric_z_fofr(Likelihood):
             'deta'    : 0.14,
             'nu_deta' : 0.06
             }
-            
+
             Ob = cosmo.Omega_b()
-            Om = cosmo.Omega_m()            
+            Om = cosmo.Omega_m()
 
             fb = Ob/Om
             if fb < 0.1 or fb > 0.25:
@@ -389,17 +389,17 @@ class euclid_photometric_z_fofr(Likelihood):
 
             z_bfc = np.linspace(self.z[0], min(2, self.z[-1]), self.BCemu_z_bins)
             BFC = np.zeros((self.BCemu_k_bins, self.BCemu_z_bins))
-    
+
             for index_z, z in enumerate(z_bfc):
                 BFC[:,index_z] = self.bfcemu.get_boost(z,bcemu_dict,k_bfc,fb)
-    
+
             BFC_interpolator = RectBivariateSpline(k_bfc*cosmo.h(), z_bfc, BFC)
-    
+
             boost_m_nl_BCemu = np.zeros((self.lbin, self.nzmax), 'float64')
- 
+
             for index_z, z in enumerate(self.z):
                 boost_m_nl_BCemu[:, index_z] = BFC_interpolator(np.minimum(k[:,index_z],12.5*cosmo.h()),min(z, 2))[:,0]
-       
+
             Pk *= boost_m_nl_BCemu
 
         ####################
@@ -411,7 +411,7 @@ class euclid_photometric_z_fofr(Likelihood):
                 D_z[index_z] = cosmo.scale_independent_growth_factor(zz)
             D_z= D_z[None,:]
 
-        elif self.scale_dependent_f ==True: 
+        elif self.scale_dependent_f ==True:
             D_z =np.ones((self.lbin,self.nzmax), 'float64')
             for index_l, index_z in index_pknn:
                 D_z[index_l,index_z] = np.sqrt(Pk_l(self.z[index_z],k[index_l,index_z])/Pk_l(0,k[index_l,index_z]))
@@ -687,7 +687,7 @@ class euclid_photometric_z_fofr(Likelihood):
                 ells = ells_GC
 
             d_the = np.linalg.det(Cov_theory)
-            d_obs = np.linalg.det(self.Cov_observ)    
+            d_obs = np.linalg.det(self.Cov_observ)
             d_mix = np.zeros_like(d_the)
             for i in range(2*self.nbin):
                 newCov = Cov_theory.copy()
@@ -713,7 +713,7 @@ class euclid_photometric_z_fofr(Likelihood):
 
         elif 'WL' in self.probe:
             d_the = np.linalg.det(Cov_theory)
-            d_obs = np.linalg.det(self.Cov_observ) 
+            d_obs = np.linalg.det(self.Cov_observ)
             d_mix = np.zeros_like(d_the)
             for i in range(self.nbin):
                 newCov = np.copy(Cov_theory)
@@ -726,7 +726,7 @@ class euclid_photometric_z_fofr(Likelihood):
 
         elif 'GCph' in self.probe:
             d_the = np.linalg.det(Cov_theory)
-            d_obs = np.linalg.det(self.Cov_observ) 
+            d_obs = np.linalg.det(self.Cov_observ)
             d_mix = np.zeros_like(d_the)
             for i in range(self.nbin):
                 newCov = np.copy(Cov_theory)
