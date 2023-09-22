@@ -16,12 +16,12 @@ from scipy.interpolate import interp1d, RectBivariateSpline
 import sys,os
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))
 from montepython.MGfit_Winther import pofk_enhancement ,pofk_enhancement_linear , kazuya_correktion
+from montepython.forge_emulator.FORGE_emulator import FORGE
 
 try:
     import BCemu
 except:
-    print("Please install the BCemu package from https://github.com/sambit-giri/BCemu !")
-    pass
+    raise Exception ("Please install the BCemu package from https://github.com/sambit-giri/BCemu !")
 
 import numpy as np
 import warnings
@@ -31,6 +31,7 @@ class euclid_photometric_z_fofr(Likelihood):
 
     def __init__(self, path, data, command_line):
         self.debug_save  = False
+        self.debug_plot = False
         Likelihood.__init__(self, path, data, command_line)
 
         # Force the cosmological module to store Pk for redshifts up to
@@ -121,8 +122,14 @@ class euclid_photometric_z_fofr(Likelihood):
                 lum[index] = line.split()[1]
             self.lum_func = interp1d(zlum, lum,kind='linear')
 
+        self.forge = None
+
         if self.use_fofR != False:
             self.nuisance += ['lgfR0']
+
+            #if self.use_fofR == 'Forge':
+            self.forge = FORGE()
+            self.forge_norm_Bk = None
 
         if self.use_BCemu:
             self.nuisance += ['log10Mc']
@@ -189,6 +196,7 @@ class euclid_photometric_z_fofr(Likelihood):
                             for nl in range(l_high):
                                 self.Cov_observ_high[nl,Bin1,Bin2] = float(line)
                                 line = fid_file.readline()
+
         else:
             if self.fit_diffrent_data:
                 self.use_fofR = self.model_use_fofR
@@ -233,7 +241,6 @@ class euclid_photometric_z_fofr(Likelihood):
         term4 =-c0*(1-f_out)*erf((0.707107*(z-zb-cb*self.z_bin_edge[bin    ]))/(sigma_b*(1+z)))
         return (term1+term2+term3+term4)/(2*c0*cb)
 
-    #TODO make pk enhancement model dependant
     def get_sigma8_fofR(self,k,Pk,h,lgfR0):
 
         x = k*8/h
@@ -329,6 +336,7 @@ class euclid_photometric_z_fofr(Likelihood):
         ########################
 
         if self.use_fofR == 'Winther':
+            print("f(R) active with Winther fitting function")
             lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
             f_R0=np.power(10,-1*lgfR0)
             boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
@@ -342,6 +350,73 @@ class euclid_photometric_z_fofr(Likelihood):
                 data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
 
             Pk *= boost_m_nl_fofR
+
+        elif self.use_fofR in ['Forge','Forge_corr']:
+            print("f(R) active with Forge emulator")
+            lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
+            f_R0=np.power(10,-1*lgfR0)
+
+            z_max = 2.0
+            redshifts = self.z[self.z <= z_max]
+
+            Bk = []
+
+            omch2 = data.mcmc_parameters['omega_cdm']['current']*data.mcmc_parameters['omega_cdm']['scale']
+            ombh2 = data.mcmc_parameters['omega_b']['current']*data.mcmc_parameters['omega_b']['scale']
+            hubble = cosmo.h()
+            pars_dict={'sigma8': cosmo.sigma8(),
+                       'h': hubble,
+                       'Omega_m': (omch2 + ombh2) / hubble ** 2}
+
+            forge_bounds={'Omega_m': [0.18, 0.55],
+                          'sigma8': [0.6, 1.0],
+                          'h': [0.6, 0.8]}
+
+            if (lgfR0 > 6.2 or lgfR0 < 4.5):
+
+                raise Exception("Outside of FORGE range")
+
+            else:
+                # Replace cosmo params by the values at the end of the range,
+                # if necessary to extrapolate.
+                for key in pars_dict.keys():
+                    if (pars_dict[key] > forge_bounds[key][1]):
+                        pars_dict[key] = forge_bounds[key][1]
+                    elif (pars_dict[key] < forge_bounds[key][0]):
+                        pars_dict[key] = forge_bounds[key][0]
+
+                for redshift in redshifts:
+                    B_f, _ = self.forge.predict_Bk(redshift,
+                                                    pars_dict['Omega_m'],
+                                                    pars_dict['h'],
+                                                    lgfR0,
+                                                    pars_dict['sigma8'])
+                    Bk.append(B_f)
+
+            Bk = np.asarray(Bk)
+            k_forge = self.forge.k
+
+            if self.use_fofR == 'Forge_corr':
+                if self.forge_norm_Bk is None:
+
+                    self.forge_norm_Bk = self.forge_norm()
+
+                Bk = Bk / self.forge_norm_Bk
+
+            Bk_interp = RectBivariateSpline(redshifts,k_forge,Bk)
+
+            boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
+            boost_m_l_fofR  = np.zeros((self.lbin, self.nzmax), 'float64')
+
+            for index_l, index_z in index_pknn:
+                boost_m_l_fofR [index_l, index_z]= pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/hubble)
+                boost_m_nl_fofR[index_l, index_z]= Bk_interp(self.z[index_z],k[index_l,index_z]/hubble)
+
+            if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']):
+                data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
+
+            Pk *= boost_m_nl_fofR
+
 
         if self.use_BCemu:
             # baryonic feedback modifications are only applied to k>kmin_bfc
@@ -488,7 +563,11 @@ class euclid_photometric_z_fofr(Likelihood):
         ####################
         # Plot Pk and Cl's #
         ####################
-        
+
+        if self.debug_plot == True:
+            print("For debug, returning Cls")
+            return k, self.z, Pk, Cl_LL, Cl_GG, Cl_LG, Cl_GL
+
         # do you want to save the powerspectrum?
         Plot_debug = False
         if Plot_debug == True:
@@ -519,16 +598,16 @@ class euclid_photometric_z_fofr(Likelihood):
            'LG': 0.,
            'GL': 0.,
            'GG': 1./self.n_bar}
-        
+
         # add noise to Ceeells after saving to better compare
         for i in range(self.nbin):
             if 'WL' in self.probe or 'WL_GCph_XC' in self.probe:
                 Cl_LL[:,i,i] += self.noise['LL']
             if 'GCph' in self.probe or 'WL_GCph_XC' in self.probe:
-                Cl_GG[:,i,i] += self.noise['GG']    
+                Cl_GG[:,i,i] += self.noise['GG']
             if 'WL_GCph_XC' in self.probe:
                 Cl_GL[:,i,i] += self.noise['GL']
-                Cl_LG[:,i,i] += self.noise['LG'] 
+                Cl_LG[:,i,i] += self.noise['LG']
 
         #############
         # Spline Cl #
@@ -720,3 +799,36 @@ class euclid_photometric_z_fofr(Likelihood):
 
         print("euclid photometric: chi2 = ",chi2)
         return -chi2/2.
+
+    def forge_norm(self):
+        """forge normalization calculation
+
+        Returns
+        -------
+        b_arr: 2D array
+           Array with boost
+
+        """
+
+        z_max = 2.0
+        redshifts = self.z[self.z <= z_max]
+
+        Bk = []
+
+        Omega_m = 0.31315
+        sigma8 = 0.82172
+        h = 0.6737
+        fR0= 6.5
+
+        for redshift in redshifts:
+            B_f, _ = self.forge.predict_Bk(redshift,
+                                            Omega_m,
+                                            h,
+                                            fR0,
+                                            sigma8)
+            Bk.append(B_f)
+
+
+        Bk=np.asarray(Bk)
+
+        return Bk
