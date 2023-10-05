@@ -1,0 +1,4 @@
+gaussianprior.ns           = 0.96
+gaussianprior.sigma_ns     = 0.004
+gaussianprior.omegab       = 0.022445
+gaussianprior.sigma_omegab = 0.00036

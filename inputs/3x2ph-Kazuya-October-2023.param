@@ -1,0 +1,112 @@
+#-----CLASS v3.2.0 (branch: master, hash: aa92943e4ab86b56970953589b4897adf2bd0f99)-----
+
+#------Experiments to test (separated with commas)-----
+
+data.experiments=['euclid_photometric_z_fofr', 'gaussianprior']
+
+#------ Parameter list -------
+
+# data.parameters[class name] = [mean, min, max, 1-sigma, scale, role]
+# - if min max irrelevant, put to -1 or None (if you want a boundary of -1, use -1.0)
+# - if fixed, put 1-sigma to 0
+# - if scale irrelevant, put to 1, otherwise to the appropriate factor
+# - role is either 'cosmo', 'nuisance' or 'derived'
+
+data.over_sampling=[1,1]
+
+# Cosmological parameter list
+data.parameters['omega_b']         = [0.022445      , 0.01,  0.04,    0.0002315,   1, 'cosmo']
+data.parameters['omega_cdm']       = [0.1205579307  , 0.005,  1.0,    0.0002315,   1, 'cosmo']
+data.parameters['H0']              = [67.0   ,   10.,  150,             0.14874,   1, 'cosmo']
+data.parameters['ln10^{10}A_s']    = [3.05685,   2.7,  3.3,                0.01,   1, 'cosmo']
+data.parameters['n_s']             = [0.96   ,   0.92,  1.00,       0.005,   1, 'cosmo']
+
+#nuisance
+data.parameters['lgfR0']           = [ 5.30103, 4, 7, 0.018739311, 1, 'nuisance']
+data.parameters['aIA']             = [ 1.71,  	 0,   12.1,  0.01, 1, 'nuisance']
+data.parameters['etaIA']           = [-0.41,  -7.0,   6.17,  0.01, 1, 'nuisance']
+data.parameters['betaIA']          = [    0,   0.63,   5.0,     0, 1, 'nuisance']
+
+data.parameters['bias_1']          = [1.0998,  None, None,   2.21512028e-04,  1,  'nuisance']
+data.parameters['bias_2']          = [1.2202,  None, None,   2.52145760e-04,  1,  'nuisance']
+data.parameters['bias_3']          = [1.2724,  None, None,   2.63602488e-04,  1,  'nuisance']
+data.parameters['bias_4']          = [1.3166,  None, None,   2.72233538e-04,  1,  'nuisance']
+data.parameters['bias_5']          = [1.3581,  None, None,   2.79564834e-04,  1,  'nuisance']
+data.parameters['bias_6']          = [1.3998,  None, None,   2.82364577e-04,  1,  'nuisance']
+data.parameters['bias_7']          = [1.4446,  None, None,   2.92878201e-04,  1,  'nuisance']
+data.parameters['bias_8']          = [1.4965,  None, None,   2.80139819e-04,  1,  'nuisance']
+data.parameters['bias_9']          = [1.5652,  None, None,   2.76034179e-04,  1,  'nuisance']
+data.parameters['bias_10']         = [1.7430,  None, None,   2.90438397e-04,  1,  'nuisance']
+
+#derived_lkl
+data.parameters['sigma8_fofR']     = [0,      -1, -1, 0,     1, 'derived_lkl']
+
+#Fixed parameter list
+data.cosmo_arguments['N_ncdm'] = 1
+data.cosmo_arguments['YHe'] = 0.2454006
+data.cosmo_arguments['reio_parametrization'] = 'reio_none'
+data.cosmo_arguments['N_ur'] = 2.0313333333333334
+data.cosmo_arguments['T_ncdm'] = 0.7163687246184776
+data.cosmo_arguments['Omega_ncdm'] = 0.0014364583758518807
+
+data.cosmo_arguments['k_per_decade_for_pk'] = 50
+data.cosmo_arguments['k_per_decade_for_bao'] = 50
+data.cosmo_arguments['non linear'] = 'halofit'
+data.cosmo_arguments['nonlinear_min_k_max'] = 80.
+
+#------ Mcmc parameters ----
+# Number of steps taken, by default (overwritten by the -N command)
+data.N=10
+# Number of accepted steps before writing to file the chain. Larger means less
+# access to disc, but this is not so much time consuming.
+data.write_step=5
+
+
+#-----Likelihood-euclid_photometric_z_fofr-----
+euclid_photometric_z_fofr.data_directory = '/mnt/lustre/koyamak/KPJC6/montepython_public/data'
+euclid_photometric_z_fofr.fiducial_file = 'euclid_3x2_CLOE.dat'
+euclid_photometric_z_fofr.probe = ['WL_GCph_XC']
+euclid_photometric_z_fofr.lmin = 10
+euclid_photometric_z_fofr.lmax_WL = 5000
+euclid_photometric_z_fofr.lmax_GC = 3000
+euclid_photometric_z_fofr.lmax_XC = 3000
+euclid_photometric_z_fofr.lbin = 20
+euclid_photometric_z_fofr.zmin = 0.001
+euclid_photometric_z_fofr.zmax = 2.5
+euclid_photometric_z_fofr.nbin = 10
+euclid_photometric_z_fofr.fsky = 0.3636
+euclid_photometric_z_fofr.gal_per_sqarcmn = 30.0
+euclid_photometric_z_fofr.nzmax = 200
+euclid_photometric_z_fofr.rms_shear = 0.3
+euclid_photometric_z_fofr.use_halofit = False
+euclid_photometric_z_fofr.k_min_h_by_Mpc = 0.001
+euclid_photometric_z_fofr.k_max_h_by_Mpc = 50.0
+euclid_photometric_z_fofr.scale_dependent_f = False
+euclid_photometric_z_fofr.bias_model = 'binned'
+euclid_photometric_z_fofr.use_fofR = 'Winther'
+euclid_photometric_z_fofr.use_bug = False
+euclid_photometric_z_fofr.use_MGGrowth = False
+euclid_photometric_z_fofr.verbose = True
+euclid_photometric_z_fofr.use_BCemu = False
+euclid_photometric_z_fofr.BCemu_k_bins = 200
+euclid_photometric_z_fofr.BCemu_z_bins = 20
+euclid_photometric_z_fofr.fit_diffrent_data = False
+euclid_photometric_z_fofr.model_use_fofR = 'Winther'
+euclid_photometric_z_fofr.model_use_BCemu = True
+
+
+#-----Likelihood-gaussianprior-----
+gaussianprior.omegab = 0.022445
+gaussianprior.sigma_omegab = 0.00036
+
+
+#-----------Cosmological-arguments---------
+data.cosmo_arguments.update({'N_ncdm': 1, 'YHe': 0.2454006, 'reio_parametrization': 'reio_none', 'N_ur': 2.0313333333333334, 'T_ncdm': 0.7163687246184776, 'Omega_ncdm': 0.0014364583758518807, 'k_per_decade_for_pk': 50, 'k_per_decade_for_bao': 50, 'non linear': 'halofit', 'nonlinear_min_k_max': 80.0, 'output': 'mPk', 'z_max_pk': 2.5, 'P_k_max_1/Mpc': 75.0})
+
+
+#--------Default-Configuration------
+data.path['root']	= '/mnt/lustre/koyamak/KPJC6/montepython_public'
+data.path['MontePython']	= '/mnt/lustre/koyamak/KPJC6/montepython_public/montepython'
+data.path['data']	= '/mnt/lustre/koyamak/KPJC6/montepython_public/data'
+data.path['cosmo']	= '/mnt/lustre/koyamak/KPJC6/class_public'
+data.path['clik']	= '/mnt/lustre/koyamak/KPJC6/planck/code/plc_3.0/plc-3.01'
