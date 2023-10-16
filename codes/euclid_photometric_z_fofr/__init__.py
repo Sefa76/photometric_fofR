@@ -18,6 +18,17 @@ sys.path.append(os.path.dirname(os.path.realpath(__file__)))
 from montepython.MGfit_Winther import pofk_enhancement ,pofk_enhancement_linear , kazuya_correktion
 from montepython.forge_emulator.FORGE_emulator import FORGE
 
+
+try:
+    import cosmopower as cp
+    from cosmopower import cosmopower_NN
+    cp_nn = cosmopower_NN(restore=True,restore_filename='./react/react_boost_spph_nn_wide_100k_mt')
+
+except:
+    print("Please install the cosmopower package from https://github.com/alessiospuriomancini/cosmopower !")
+    pass
+
+
 try:
     import BCemu
 except:
@@ -26,6 +37,10 @@ except:
 import numpy as np
 import warnings
 from scipy.special import erf
+
+# Found I needed to manually set this, otherwise cp is not recognised in the ReACT boost call
+#os.environ["OMP_NUM_THREADS"] = '10'
+
 
 class euclid_photometric_z_fofr(Likelihood):
 
@@ -415,6 +430,124 @@ class euclid_photometric_z_fofr(Likelihood):
             if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']):
                 data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
 
+            Pk *= boost_m_nl_fofR
+
+
+        if self.use_fofR == 'ReACT':
+            # Halo model reaction based boost. Emulator based on output from ReACT and HMCode2020 (for pseudo and LCDM)
+            # Emulator range given below. It outputs in [0.01,3] h/Mpc
+            # Includes massive neutrinos which are here set to 0 manually
+
+            # TODO:
+            # Extract omnuh2 from data vector (trivial ... )
+            # Optimise clipping and setting boost = 1 for z>zmax
+            # Extrapolate to small k? Perhaps not necessary as boost should be 1 at kmin = 0.01h/Mpc ....
+
+            print("f(R) active with ReACT")
+
+            # Empty arrays to store nonlinear and linear boosts
+            boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
+            boost_m_l_fofR  = np.zeros((self.lbin, self.nzmax), 'float64')
+
+            # Set parameters for the emulator
+            hubble = cosmo.h()
+
+            lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
+            omch2 = data.mcmc_parameters['omega_cdm']['current']*data.mcmc_parameters['omega_cdm']['scale']
+            ombh2 = data.mcmc_parameters['omega_b']['current']*data.mcmc_parameters['omega_b']['scale']
+            omnuh2 = 0.000644192 # - need to extract this from data
+
+            # Emulator parameters
+            h2 = hubble**2
+            om = (omch2 + ombh2 + omnuh2) / h2 # Choosing total matter to include neutrino fraction
+            ob = ombh2 / h2
+            onu = 0.0 # set omega_nu = 0 in the reaction
+            myAs = np.exp(data.mcmc_parameters['ln10^{10}A_s']['current']*data.mcmc_parameters['ln10^{10}A_s']['scale'])/10**10
+            myns = data.mcmc_parameters['n_s']['current']*data.mcmc_parameters['n_s']['scale']
+            myH0 = data.mcmc_parameters['H0']['current']*data.mcmc_parameters['H0']['scale']
+            f_R0=np.power(10,-1*lgfR0)
+
+
+            # Emulator max redshift
+            zmax = 2;
+
+            # Emulator parameter ranges
+            react_bounds = {'Omega_m' : [0.24 , 0.35],
+                            'Omega_b' : [0.04 , 0.06],
+                            'H0' : [63.0 , 75.0],
+                            'ns' : [0.9 , 1.01],
+                            'Omega_nu' : [0.0, 0.00317],
+                            'As' : [1.7e-9 , 2.5e-9],
+                            'fR0' : [1e-10 , 1e-4],
+                            'z' : [0 , zmax]}
+
+            # Get boost, interpolate and extrapolate:
+
+            # Set up dictionary with input parameters for boost over all redshifts
+            nz_Pk = len(self.z)
+            params_cp = {'Omega_m': om*np.ones(nz_Pk),
+                         'Omega_b': ob*np.ones(nz_Pk),
+                         'H0': myH0*np.ones(nz_Pk),
+                         'ns': myns*np.ones(nz_Pk),
+                         'Omega_nu': onu*np.ones(nz_Pk),
+                         'As': myAs*np.ones(nz_Pk),
+                         'fR0': f_R0*np.ones(nz_Pk),
+                         'z': self.z }
+
+
+            # Replace cosmo params by values at end of range if outside range
+            # OPTIMISE: clip proceeds elementwise, so this is 8 x nzPk comparisons .... ?
+            for key in params_cp.keys():
+                params_cp[key] = np.clip(params_cp[key], react_bounds[key][0], react_bounds[key][1])
+
+
+            # Set all z>2 to have fr0 = 0 (i.e boost =1)
+            # OPTIMISE: There is probably a better way to do this ...
+            for index_z in range(nz_Pk):
+                if(self.z[index_z]>=zmax):
+                    params_cp['fR0'][index_z] = 1e-10
+
+            # Calculate the boost at all redshifts create 2d spline in (k,z)
+
+            # Ensure boost is always greater or equal to 1
+            Boost = np.maximum(1.0,cp_nn.predictions_np(params_cp))
+            kvals = cp_nn.modes
+
+            # Extrapolate to high values of k
+            # Values to extrapolate to
+            mykmax = 50
+            mykmin = kvals[-1]+0.01
+            N_grid = 300
+
+            # Create k bins at which to extrapolate to
+            k_extrapolate = np.linspace(mykmin, mykmax , N_grid)
+
+            # Array to store extrapolated values
+            Bk_ext=[]
+
+            #Extrapolate only for redshifts where boost is non-trivial, otherwise it is 1
+            for index_z in range(nz_Pk):
+                if(self.z[index_z]<=zmax):
+                    Bk_ext.append(interp1d(kvals,Boost[index_z],fill_value='extrapolate')(k_extrapolate))
+                else:
+                    Bk_ext.append(np.ones(N_grid))
+
+            # Attach extended k-grid and boosts to emulator's grid and boosts
+            concatenated_boost = np.hstack((Boost,Bk_ext))
+            concatenated_k = np.hstack((kvals, k_extrapolate))
+
+            # Spline final function which now extends to mykmax using a power law extrapolation
+            Bk_interp = RectBivariateSpline(self.z,concatenated_k,concatenated_boost)
+
+            # Fill up boost array
+            for index_l, index_z in index_pknn:
+                boost_m_l_fofR [index_l, index_z]= pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h())
+                boost_m_nl_fofR[index_l, index_z] = Bk_interp(self.z[index_z],k[index_l,index_z]/hubble)
+
+            if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']):
+                data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
+
+            # Apply the boost
             Pk *= boost_m_nl_fofR
 
 
