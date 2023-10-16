@@ -361,12 +361,12 @@ class euclid_photometric_z_fofr(Likelihood):
 
             Bk = []
 
-            omch2 = data.mcmc_parameters['omega_cdm']['current']*data.mcmc_parameters['omega_cdm']['scale']
-            ombh2 = data.mcmc_parameters['omega_b']['current']*data.mcmc_parameters['omega_b']['scale']
+            Omc = cosmo.Omega0_cdm()
+            Omb = cosmo.Omega_b()
             hubble = cosmo.h()
             pars_dict={'sigma8': cosmo.sigma8(),
                        'h': hubble,
-                       'Omega_m': (omch2 + ombh2) / hubble ** 2}
+                       'Omega_m': Omc+Omb}
 
             forge_bounds={'Omega_m': [0.18, 0.55],
                           'sigma8': [0.6, 1.0],
