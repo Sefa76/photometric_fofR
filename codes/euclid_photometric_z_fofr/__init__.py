@@ -22,8 +22,6 @@ from montepython.forge_emulator.FORGE_emulator import FORGE
 try:
     import cosmopower as cp
     from cosmopower import cosmopower_NN
-    cp_nn = cosmopower_NN(restore=True,restore_filename='./react/react_boost_spph_nn_wide_100k_mt')
-
 except:
     print("Please install the cosmopower package from https://github.com/alessiospuriomancini/cosmopower !")
     pass
@@ -145,7 +143,7 @@ class euclid_photometric_z_fofr(Likelihood):
             #if self.use_fofR == 'Forge':
             self.forge = FORGE()
             self.forge_norm_Bk = None
-
+            self.cp_nn = cosmopower_NN(restore=True,restore_filename='./montepython/react/react_boost_spph_nn_wide_100k_mt')
         if self.use_BCemu:
             self.nuisance += ['log10Mc']
             self.nuisance += ['nu_Mc']
@@ -450,23 +448,23 @@ class euclid_photometric_z_fofr(Likelihood):
             boost_m_l_fofR  = np.zeros((self.lbin, self.nzmax), 'float64')
 
             # Set parameters for the emulator
-            hubble = cosmo.h()
-
             lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
-            omch2 = data.mcmc_parameters['omega_cdm']['current']*data.mcmc_parameters['omega_cdm']['scale']
-            ombh2 = data.mcmc_parameters['omega_b']['current']*data.mcmc_parameters['omega_b']['scale']
-            omnuh2 = 0.000644192 # - need to extract this from data
-
-            # Emulator parameters
-            h2 = hubble**2
-            om = (omch2 + ombh2 + omnuh2) / h2 # Choosing total matter to include neutrino fraction
-            ob = ombh2 / h2
-            onu = 0.0 # set omega_nu = 0 in the reaction
-            myAs = np.exp(data.mcmc_parameters['ln10^{10}A_s']['current']*data.mcmc_parameters['ln10^{10}A_s']['scale'])/10**10
-            myns = data.mcmc_parameters['n_s']['current']*data.mcmc_parameters['n_s']['scale']
-            myH0 = data.mcmc_parameters['H0']['current']*data.mcmc_parameters['H0']['scale']
             f_R0=np.power(10,-1*lgfR0)
 
+            hubble = cosmo.h()
+            Omc = cosmo.Omega0_cdm()
+            Omb = cosmo.Omega_b()
+            Omnu = cosmo.Omega_nu
+
+            # Emulator parameters
+            Om = (Omc + Omb + Omnu)  # Choosing total matter to include neutrino fraction
+            Ob = Omb
+            Onu = 0.0 # set omega_nu = 0 in the reaction
+        
+            primordial = cosmo.get_current_derived_parameters(['A_s','n_s'])    
+            myAs = primordial['A_s']
+            myns = primordial['n_s']
+            myH0 = hubble*100
 
             # Emulator max redshift
             zmax = 2;
@@ -485,11 +483,11 @@ class euclid_photometric_z_fofr(Likelihood):
 
             # Set up dictionary with input parameters for boost over all redshifts
             nz_Pk = len(self.z)
-            params_cp = {'Omega_m': om*np.ones(nz_Pk),
-                         'Omega_b': ob*np.ones(nz_Pk),
+            params_cp = {'Omega_m': Om*np.ones(nz_Pk),
+                         'Omega_b': Ob*np.ones(nz_Pk),
                          'H0': myH0*np.ones(nz_Pk),
                          'ns': myns*np.ones(nz_Pk),
-                         'Omega_nu': onu*np.ones(nz_Pk),
+                         'Omega_nu': Onu*np.ones(nz_Pk),
                          'As': myAs*np.ones(nz_Pk),
                          'fR0': f_R0*np.ones(nz_Pk),
                          'z': self.z }
@@ -510,8 +508,8 @@ class euclid_photometric_z_fofr(Likelihood):
             # Calculate the boost at all redshifts create 2d spline in (k,z)
 
             # Ensure boost is always greater or equal to 1
-            Boost = np.maximum(1.0,cp_nn.predictions_np(params_cp))
-            kvals = cp_nn.modes
+            Boost = np.maximum(1.0,self.cp_nn.predictions_np(params_cp))
+            kvals = self.cp_nn.modes
 
             # Extrapolate to high values of k
             # Values to extrapolate to
