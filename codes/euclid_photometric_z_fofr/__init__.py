@@ -137,18 +137,6 @@ class euclid_photometric_z_fofr(Likelihood):
 
         self.forge = None
 
-        if self.use_fofR != False:
-            self.nuisance += ['lgfR0']
-
-            #if self.use_fofR == 'Forge':
-            self.forge = FORGE()
-            self.forge_norm_Bk = None
-            self.cp_nn = cosmopower_NN(restore=True,restore_filename='./montepython/react/react_boost_spph_nn_wide_100k_mt')
-        if self.use_BCemu:
-            self.nuisance += ['log10Mc']
-            self.nuisance += ['nu_Mc']
-            self.bfcemu = BCemu.BCM_7param(verbose=False)
-
         ###########
         # Read data
         ###########
@@ -214,6 +202,22 @@ class euclid_photometric_z_fofr(Likelihood):
             if self.fit_diffrent_data:
                 self.use_fofR = self.model_use_fofR
                 self.use_BCemu= self.model_use_BCemu
+
+        ## different non linear models
+        if self.use_fofR != False:
+            self.nuisance += ['lgfR0']
+
+            if self.use_fofR in ['Forge','Forge_corr']:
+                self.forge = FORGE()
+                self.forge_norm_Bk = None
+            
+            if self.use_fofR == 'ReACT':
+                self.cp_nn = cosmopower_NN(restore=True,restore_filename='./montepython/react/react_boost_spph_nn_wide_100k_mt')
+
+        if self.use_BCemu:
+            self.nuisance += ['log10Mc']
+            self.nuisance += ['nu_Mc']
+            self.bfcemu = BCemu.BCM_7param(verbose=False)
 
         return
 
