@@ -15,7 +15,7 @@ from scipy.interpolate import interp1d, RectBivariateSpline
 
 import sys,os
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))
-from montepython.MGfit_Winther import pofk_enhancement ,pofk_enhancement_linear , kazuya_correktion
+from montepython.MGfit_Winther import pofk_enhancement ,pofk_enhancement_linear , kazuya_correktion 
 from montepython.forge_emulator.FORGE_emulator import FORGE
 
 
@@ -24,6 +24,13 @@ try:
     from cosmopower import cosmopower_NN
 except:
     print("Please install the cosmopower package from https://github.com/alessiospuriomancini/cosmopower !")
+    pass
+
+
+try:
+    from emantis import FofrBoost
+except:
+    print("Please install the emantis package from https://gitlab.obspm.fr/e-mantis/e-mantis !")
     pass
 
 
@@ -214,6 +221,14 @@ class euclid_photometric_z_fofr(Likelihood):
             if self.use_fofR == 'ReACT':
                 self.cp_nn = cosmopower_NN(restore=True,restore_filename='./montepython/react/react_boost_spph_nn_wide_100k_mt')
 
+            if self.use_fofR == 'emantis':
+                # extrapolate_aexp: extrapolates linearly in B-aexp for z > 2, making sure that B>=1 always.
+                # This should be disabled and the extrapolation done outside of emantis in the same way as for the other predictions.
+
+                # extrapolate_k: linear extrapolation in B-log10(k) for k < kmin=0.03, since sometimes the boost is not exactly equal to one for k=kmin.
+                # The extrapolation is done until the boost reaches B=1.
+                self.emantis = FofrBoost(verbose=True, extrapolate_aexp=True, extrapolate_low_k=True)
+
         if self.use_BCemu:
             self.nuisance += ['log10Mc']
             self.nuisance += ['nu_Mc']
@@ -360,13 +375,14 @@ class euclid_photometric_z_fofr(Likelihood):
             boost_m_l_fofR  = np.zeros((self.lbin, self.nzmax), 'float64')
 
             for index_l, index_z in index_pknn:
-                boost_m_l_fofR [index_l, index_z]= pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h())
+                boost_m_l_fofR [index_l, index_z]= pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h()) 
                 boost_m_nl_fofR[index_l, index_z]= pofk_enhancement       (self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h(),hasBug=self.use_bug)
 
             if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']):
                 data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
 
             Pk *= boost_m_nl_fofR
+
 
         elif self.use_fofR in ['Forge','Forge_corr']:
             print("f(R) active with Forge emulator")
@@ -545,6 +561,58 @@ class euclid_photometric_z_fofr(Likelihood):
             for index_l, index_z in index_pknn:
                 boost_m_l_fofR [index_l, index_z]= pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h())
                 boost_m_nl_fofR[index_l, index_z] = Bk_interp(self.z[index_z],k[index_l,index_z]/hubble)
+
+            if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']):
+                data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
+
+            # Apply the boost
+            Pk *= boost_m_nl_fofR
+
+
+        elif self.use_fofR == 'emantis':
+            print("f(R) active with e-MANTIS emulator")
+
+            lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
+            f_R0=np.power(10,-1*lgfR0)
+            boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
+            boost_m_l_fofR  = np.zeros((self.lbin, self.nzmax), 'float64')
+
+            Omc = cosmo.Omega0_cdm()
+            Omb = cosmo.Omega_b()
+            Omm = Omc + Omb
+            hubble = cosmo.h()
+
+            # Get e-mantis predictions for all z and k.
+
+            # Flatten k array.
+            k_flat = np.ravel(k)
+
+            # Init. emantis prediction array.
+            emantis_boost = np.ones((self.z.shape[0], 1, k_flat.shape[0]))
+
+            # k indices outside emantis range (k>kmax).
+            kmax = self.emantis.kbins[-1]*hubble
+            k_extrap_idx = k_flat > kmax
+
+            # Get emantis predictions for k<=kmax.
+            pred = self.emantis.predict_boost(Omm, cosmo.sigma8(), lgfR0, 1/(1+self.z), k_flat[~k_extrap_idx]/hubble)
+            emantis_boost[:,:,~k_extrap_idx] = pred
+
+            # Constant extrapolation for k>kmax.
+            # This seems like a messy way to do it, but in any case it should be replaced by a common extrapolation
+            # for all types of predictions.
+            # Get emantis predictions for k=kmax.
+            pred_kmax = self.emantis.predict_boost(Omm, cosmo.sigma8(), lgfR0, 1/(1+self.z), kmax/hubble)
+            for i in range(k_flat.shape[0]):
+                if k_extrap_idx[i]:
+                    emantis_boost[:,:,i] = pred_kmax[:,:,0]
+
+            for index_l, index_z in index_pknn:
+                boost_m_l_fofR[index_l, index_z] = pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/hubble)
+
+                # Select the required z and k.
+                idx_k_flat = np.ravel_multi_index((index_l, index_z), k.shape)
+                boost_m_nl_fofR[index_l, index_z] = emantis_boost[index_z, 0, idx_k_flat]
 
             if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']):
                 data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
