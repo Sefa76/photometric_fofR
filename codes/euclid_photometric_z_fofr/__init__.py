@@ -92,6 +92,7 @@ class euclid_photometric_z_fofr(Likelihood):
         # Create the array that will contain the z boundaries for each bin.
 
         self.z_bin_edge = np.array([self.zmin, 0.418, 0.560, 0.678, 0.789, 0.900, 1.019, 1.155, 1.324, 1.576, self.zmax])
+        self.z_bin_center = np.array([(self.z_bin_edge[i]+self.z_bin_edge[i+1])/2 for i in range(self.nbin)])
 
         # Fill array of discrete z values
         self.z = np.linspace(self.zmin, self.zmax, num=self.nzmax)
@@ -331,6 +332,11 @@ class euclid_photometric_z_fofr(Likelihood):
                     return bii
                 vbinbis = np.vectorize(binbis)
                 self.biasfunc = vbinbis
+
+            elif self.bias_model == 'interpld' :
+                for ibin in range(self.nbin):
+                    self.bias[ibin] = data.mcmc_parameters[self.bias_names[ibin]]['current']*data.mcmc_parameters[self.bias_names[ibin]]['scale']
+                self.biasfunc = interp1d(self.z_bin_center, self.bias, bounds_error=False, fill_value="extrapolate")
 
         ######################
         # Get power spectrum #
@@ -736,7 +742,7 @@ class euclid_photometric_z_fofr(Likelihood):
                 W_G = np.zeros((self.nzmax, self.nbin), 'float64')
                 W_G = self.bias[None,:] * H_z[:,None] * self.eta_z
             # - case where the bias is a single function b(z) for all bins
-            if self.bias_model == 'binned' :
+            if self.bias_model == 'binned' or self.bias_model == 'interpld':
                 W_G = np.zeros((self.nzmax, self.nbin), 'float64')
                 W_G =  (H_z * self.biasfunc(self.z))[:,None] * self.eta_z
 
