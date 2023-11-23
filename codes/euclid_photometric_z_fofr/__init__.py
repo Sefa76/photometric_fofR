@@ -145,6 +145,12 @@ class euclid_photometric_z_fofr(Likelihood):
 
         self.forge = None
 
+        if self.use_BCemu or self.model_use_BCemu:
+            self.nuisance += ['log10Mc']
+            self.nuisance += ['thej']
+            self.nuisance += ['deta']
+            self.bfcemu = BCemu.BCM_7param(verbose=False)
+
         ###########
         # Read data
         ###########
@@ -229,11 +235,6 @@ class euclid_photometric_z_fofr(Likelihood):
                 # extrapolate_k: linear extrapolation in B-log10(k) for k < kmin=0.03, since sometimes the boost is not exactly equal to one for k=kmin.
                 # The extrapolation is done until the boost reaches B=1.
                 self.emantis = FofrBoost(verbose=True, extrapolate_aexp=True, extrapolate_low_k=True)
-
-        if self.use_BCemu:
-            self.nuisance += ['log10Mc']
-            self.nuisance += ['nu_Mc']
-            self.bfcemu = BCemu.BCM_7param(verbose=False)
 
         return
 
@@ -635,23 +636,27 @@ class euclid_photometric_z_fofr(Likelihood):
             # suppression in k is assumed: BFC(k,z) = BFC(12.5 h/Mpc, z).
 
             log10Mc = data.mcmc_parameters['log10Mc']['current'] * data.mcmc_parameters['log10Mc']['scale']
-            nu_Mc   = data.mcmc_parameters['nu_Mc']['current']   * data.mcmc_parameters['nu_Mc']['scale']
+            thej = data.mcmc_parameters['thej']['current'] * data.mcmc_parameters['thej']['scale']
+            deta = data.mcmc_parameters['deta']['current'] * data.mcmc_parameters['deta']['scale']
+            nu_log10Mc = 0.0
+            nu_thej = 0.0 
+            nu_deta = 0.0 
 
             bcemu_dict ={
             'log10Mc' : log10Mc,
-            'nu_Mc'   : nu_Mc,
-            'mu'      : 0.93,
+            'nu_Mc'   : nu_log10Mc,
+            'mu'      : 1.0,
             'nu_mu'   : 0.0,
-            'thej'    : 2.6,
-            'nu_thej' : 0.0,
-            'gamma'   : 2.25,
+            'thej'    : thej,
+            'nu_thej' : nu_thej,
+            'gamma'   : 2.5,
             'nu_gamma': 0.0,
-            'delta'   : 6.4,
+            'delta'   : 7.0,
             'nu_delta': 0.0,
-            'eta'     : 0.15,
+            'eta'     : 0.2,
             'nu_eta'  : 0.0,
-            'deta'    : 0.14,
-            'nu_deta' : 0.06
+            'deta'    : deta,
+            'nu_deta' : nu_deta
             }
 
             Ob = cosmo.Omega_b()
@@ -662,10 +667,18 @@ class euclid_photometric_z_fofr(Likelihood):
                 if self.verbose: print(" /!\ Skipping point because the baryon fraction is out of bounds!")
                 return -1e10
 
-            if log10Mc / 3**nu_Mc < 11 or log10Mc / 3**nu_Mc > 15 :
+            if log10Mc / 3**nu_log10Mc < 11 or log10Mc / 3**nu_log10Mc > 15 :
                 if self.verbose: print(" /!\ Skipping point because BF parameters are out of bounds!")
                 return -1e10
 
+            if thej / 3**nu_thej < 2 or thej / 3**nu_thej > 8 :
+                if self.verbose: print(" /!\ Skipping point because BF parameters are out of bounds!")
+                return -1e10
+
+            if deta / 3**nu_deta < 0.05 or deta / 3**nu_deta > 0.4 :
+                if self.verbose: print(" /!\ Skipping point because BF parameters are out of bounds!")
+                return -1e10
+            
             kmin_in_inv_Mpc = self.k_min_h_by_Mpc * cosmo.h()
             kmin_bfc = 0.035
             kmax_bfc = 12.5
