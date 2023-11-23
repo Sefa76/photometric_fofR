@@ -638,15 +638,17 @@ class euclid_photometric_z_fofr(Likelihood):
             log10Mc = data.mcmc_parameters['log10Mc']['current'] * data.mcmc_parameters['log10Mc']['scale']
             thej = data.mcmc_parameters['thej']['current'] * data.mcmc_parameters['thej']['scale']
             deta = data.mcmc_parameters['deta']['current'] * data.mcmc_parameters['deta']['scale']
-
+            nu_log10Mc = 0.0
+            nu_thej = 0.0 
+            nu_deta = 0.0 
 
             bcemu_dict ={
             'log10Mc' : log10Mc,
-            'nu_Mc'   : 0.0,
+            'nu_Mc'   : nu_log10Mc,
             'mu'      : 1.0,
             'nu_mu'   : 0.0,
             'thej'    : thej,
-            'nu_thej' : 0.0,
+            'nu_thej' : nu_thej,
             'gamma'   : 2.5,
             'nu_gamma': 0.0,
             'delta'   : 7.0,
@@ -654,7 +656,7 @@ class euclid_photometric_z_fofr(Likelihood):
             'eta'     : 0.2,
             'nu_eta'  : 0.0,
             'deta'    : deta,
-            'nu_deta' : 0.0
+            'nu_deta' : nu_deta
             }
 
             Ob = cosmo.Omega_b()
@@ -665,10 +667,18 @@ class euclid_photometric_z_fofr(Likelihood):
                 if self.verbose: print(" /!\ Skipping point because the baryon fraction is out of bounds!")
                 return -1e10
 
-            if log10Mc / 3**nu_Mc < 11 or log10Mc / 3**nu_Mc > 15 :
+            if log10Mc / 3**nu_log10Mc < 11 or log10Mc / 3**nu_log10Mc > 15 :
                 if self.verbose: print(" /!\ Skipping point because BF parameters are out of bounds!")
                 return -1e10
 
+            if thej / 3**nu_thej < 2 or thej / 3**nu_thej > 8 :
+                if self.verbose: print(" /!\ Skipping point because BF parameters are out of bounds!")
+                return -1e10
+
+            if deta / 3**nu_deta < 0.05 or deta / 3**nu_deta > 0.4 :
+                if self.verbose: print(" /!\ Skipping point because BF parameters are out of bounds!")
+                return -1e10
+            
             kmin_in_inv_Mpc = self.k_min_h_by_Mpc * cosmo.h()
             kmin_bfc = 0.035
             kmax_bfc = 12.5
