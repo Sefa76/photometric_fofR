@@ -619,24 +619,27 @@ class euclid_photometric_z_fofr(Likelihood):
 
             # Get e-mantis predictions for all z and k.
 
-            # Flatten k array.
-            k_flat = np.ravel(k)
-
-            # Init. emantis prediction array.
-            emantis_boost = np.ones((self.z.shape[0], 1, k_flat.shape[0]))
-
             # k indices outside emantis range (k>kmax).
             kmax = self.emantis.kbins[-1]*hubble
-            k_extrap_idx = k_flat > kmax
-
+            k_grid_emantis = np.geomspace(0.01,kmax,100)
+            B_grid_emantis = self.emantis.predict_boost(emantis_Omm, emantis_s8, lgfR0, 1/(1+self.z), k_grid_emantis/hubble)
+            interp_Boost = RectBivariateSpline(self.z,k_grid_emantis,B_grid_emantis[:,0,:])
             # Get emantis predictions for k<=kmax.
-            pred = self.emantis.predict_boost(emantis_Omm, emantis_s8, lgfR0, 1/(1+self.z), k_flat[~k_extrap_idx]/hubble)
 
             fofR_zmax = 2
-            fofR_kmax = 3*cosmo.h() #In 1/Mpc
-            fofR_boost = lambda k_l, z_l: self.emantis.predict_boost(emantis_Omm, emantis_s8, lgfR0, 1/(1+z_l), k_l/cosmo.h())
+            fofR_kmax = kmax #In 1/Mpc
+            fofR_boost = lambda k, z: interp_Boost(z,k)
+            
+            # # Init. emantis prediction array.
+            # emantis_boost = np.ones((self.z.shape[0], 1, k_flat.shape[0]))
 
+            # # Flatten k array.
+            # k_flat = np.ravel(k)
+            # k_extrap_idx = k_flat > kmax
+
+            # pred= self.emantis.predict_boost(emantis_Omm, emantis_s8, lgfR0, 1/(1+self.z), k_flat[~k_extrap_idx]/hubble)
             # emantis_boost[:,:,~k_extrap_idx] = pred
+
 
             # # Constant extrapolation for k>kmax.
             # # This seems like a messy way to do it, but in any case it should be replaced by a common extrapolation
