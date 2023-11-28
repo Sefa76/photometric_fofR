@@ -466,12 +466,16 @@ class euclid_photometric_z_fofr(Likelihood):
 
             Bk_interp = RectBivariateSpline(redshifts,k_forge,Bk)
 
-            boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
+            fofR_zmax = 2
+            fofR_kmax = 10*cosmo.h() #In 1/Mpc
+            fofR_boost = lambda k_l, z_l: Bk_interp(z_l, k_l / cosmo.h())
 
-            for index_l, index_z in index_pknn:
-                boost_m_nl_fofR[index_l, index_z]= Bk_interp(self.z[index_z],k[index_l,index_z]/hubble)
+            # boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
 
-            Pk *= boost_m_nl_fofR
+            # for index_l, index_z in index_pknn:
+            #     boost_m_nl_fofR[index_l, index_z]= Bk_interp(self.z[index_z],k[index_l,index_z]/hubble)
+
+            # Pk *= boost_m_nl_fofR
 
 
         if self.use_fofR == 'ReACT':
@@ -553,39 +557,44 @@ class euclid_photometric_z_fofr(Likelihood):
             Boost = np.maximum(1.0,self.cp_nn.predictions_np(params_cp))
             kvals = self.cp_nn.modes
 
-            # Extrapolate to high values of k
-            # Values to extrapolate to
-            mykmax = 50
-            mykmin = kvals[-1]+0.01
-            N_grid = 300
+            ReACT_interp = RectBivariateSpline(self.z,kvals,Boost)
+            fofR_zmax = 2
+            fofR_kmax = 3*cosmo.h() #In 1/Mpc
+            fofR_boost = lambda k_l, z_l: ReACT_interp(z_l, k_l / cosmo.h())
 
-            # Create k bins at which to extrapolate to
-            k_extrapolate = np.linspace(mykmin, mykmax , N_grid)
+            # # Extrapolate to high values of k
+            # # Values to extrapolate to
+            # mykmax = 50
+            # mykmin = kvals[-1]+0.01
+            # N_grid = 300
 
-            # Array to store extrapolated values
-            Bk_ext=[]
+            # # Create k bins at which to extrapolate to
+            # k_extrapolate = np.linspace(mykmin, mykmax , N_grid)
 
-            #Extrapolate only for redshifts where boost is non-trivial, otherwise it is 1
-            for index_z in range(nz_Pk):
-                if(self.z[index_z]<=zmax):
-                    Bk_ext.append(interp1d(kvals,Boost[index_z],fill_value='extrapolate')(k_extrapolate))
-                else:
-                    Bk_ext.append(np.ones(N_grid))
+            # # Array to store extrapolated values
+            # Bk_ext=[]
 
-            # Attach extended k-grid and boosts to emulator's grid and boosts
-            concatenated_boost = np.hstack((Boost,Bk_ext))
-            concatenated_k = np.hstack((kvals, k_extrapolate))
+            # #Extrapolate only for redshifts where boost is non-trivial, otherwise it is 1
+            # for index_z in range(nz_Pk):
+            #     if(self.z[index_z]<=zmax):
+            #         Bk_ext.append(interp1d(kvals,Boost[index_z],fill_value='extrapolate')(k_extrapolate))
+            #     else:
+            #         Bk_ext.append(np.ones(N_grid))
 
-            # Spline final function which now extends to mykmax using a power law extrapolation
-            Bk_interp = RectBivariateSpline(self.z,concatenated_k,concatenated_boost)
+            # # Attach extended k-grid and boosts to emulator's grid and boosts
+            # concatenated_boost = np.hstack((Boost,Bk_ext))
+            # concatenated_k = np.hstack((kvals, k_extrapolate))
 
-            # Fill up boost array
-            for index_l, index_z in index_pknn:
-                boost_m_nl_fofR[index_l, index_z] = Bk_interp(self.z[index_z],k[index_l,index_z]/hubble)
+            # # Spline final function which now extends to mykmax using a power law extrapolation
+            # Bk_interp = RectBivariateSpline(self.z,concatenated_k,concatenated_boost)
+
+            # # Fill up boost array
+            # for index_l, index_z in index_pknn:
+            #     boost_m_nl_fofR[index_l, index_z] = Bk_interp(self.z[index_z],k[index_l,index_z]/hubble)
 
 
-            # Apply the boost
-            Pk *= boost_m_nl_fofR
+            # # Apply the boost
+            # Pk *= boost_m_nl_fofR
 
 
         elif self.use_fofR == 'emantis':
@@ -622,24 +631,29 @@ class euclid_photometric_z_fofr(Likelihood):
 
             # Get emantis predictions for k<=kmax.
             pred = self.emantis.predict_boost(emantis_Omm, emantis_s8, lgfR0, 1/(1+self.z), k_flat[~k_extrap_idx]/hubble)
-            emantis_boost[:,:,~k_extrap_idx] = pred
 
-            # Constant extrapolation for k>kmax.
-            # This seems like a messy way to do it, but in any case it should be replaced by a common extrapolation
-            # for all types of predictions.
-            # Get emantis predictions for k=kmax.
-            pred_kmax = self.emantis.predict_boost(Omm, cosmo.sigma8(), lgfR0, 1/(1+self.z), kmax/hubble)
-            for i in range(k_flat.shape[0]):
-                if k_extrap_idx[i]:
-                    emantis_boost[:,:,i] = pred_kmax[:,:,0]
+            fofR_zmax = 2
+            fofR_kmax = 3*cosmo.h() #In 1/Mpc
+            fofR_boost = lambda k_l, z_l: self.emantis.predict_boost(emantis_Omm, emantis_s8, lgfR0, 1/(1+z_l), k_l/cosmo.h())
 
-            for index_l, index_z in index_pknn:
-                # Select the required z and k.
-                idx_k_flat = np.ravel_multi_index((index_l, index_z), k.shape)
-                boost_m_nl_fofR[index_l, index_z] = emantis_boost[index_z, 0, idx_k_flat]
+            # emantis_boost[:,:,~k_extrap_idx] = pred
 
-            # Apply the boost
-            Pk *= boost_m_nl_fofR
+            # # Constant extrapolation for k>kmax.
+            # # This seems like a messy way to do it, but in any case it should be replaced by a common extrapolation
+            # # for all types of predictions.
+            # # Get emantis predictions for k=kmax.
+            # pred_kmax = self.emantis.predict_boost(Omm, cosmo.sigma8(), lgfR0, 1/(1+self.z), kmax/hubble)
+            # for i in range(k_flat.shape[0]):
+            #     if k_extrap_idx[i]:
+            #         emantis_boost[:,:,i] = pred_kmax[:,:,0]
+
+            # for index_l, index_z in index_pknn:
+            #     # Select the required z and k.
+            #     idx_k_flat = np.ravel_multi_index((index_l, index_z), k.shape)
+            #     boost_m_nl_fofR[index_l, index_z] = emantis_boost[index_z, 0, idx_k_flat]
+
+            # # Apply the boost
+            # Pk *= boost_m_nl_fofR
 
         #Obtain derived quantity
         if self.use_fofR != False:
