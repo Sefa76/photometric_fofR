@@ -71,10 +71,13 @@ euclid_photometric_z_fofr.scale_dependent_f = True
 # Bias model
 euclid_photometric_z_fofr.bias_model = 'binned'
 
-#fofR fiting
+#fofR model
 euclid_photometric_z_fofr.use_fofR = 'Winther'
 euclid_photometric_z_fofr.use_bug = False
 euclid_photometric_z_fofr.use_MGGrowth = False
+euclid_photometric_z_fofr.fofR_interpolation_k_boost = 40
+euclid_photometric_z_fofr.fofR_interpolation_z_boost = 4
+
 
 # baryonic feedback
 euclid_photometric_z_fofr.verbose = True

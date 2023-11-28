@@ -12,6 +12,8 @@ from montepython.likelihood_class import Likelihood
 from scipy.integrate import trapz,simpson
 from scipy import interpolate as itp
 from scipy.interpolate import interp1d, RectBivariateSpline
+from scipy.optimize import curve_fit
+from itertools import product
 
 import sys,os
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))
@@ -276,6 +278,24 @@ class euclid_photometric_z_fofr(Likelihood):
         return (term1+term2+term3+term4)/(2*c0*cb)
 
     def get_sigma8_fofR(self,k,Pk,h,lgfR0):
+        """ Obtain the MG eqivalent of sigma8 calculated with the winther fitting formula and corrected for by matching MGCAMB
+
+        Parameters
+        ----------
+        k : numpy.ndarray
+            list of k values used in the interal calculations in 1/Mpc
+        Pk: numpy.ndarray
+            linear LCDM power spectrum at z=0 on the grid
+        h : float
+            Vaule of the reduced hubble constant
+        lgfR0: float
+            Absolute value of the log10 of the absolute value of f_R0
+
+        Returns
+        -------
+        float
+            MG eqivalent of sigma8
+        """
 
         x = k*8/h
         #Get Sigma windowfunktion
@@ -378,18 +398,16 @@ class euclid_photometric_z_fofr(Likelihood):
             print("f(R) active with Winther fitting function")
             lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
             f_R0=np.power(10,-1*lgfR0)
-            boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
-            boost_m_l_fofR  = np.zeros((self.lbin, self.nzmax), 'float64')
 
-            for index_l, index_z in index_pknn:
-                boost_m_l_fofR [index_l, index_z]= pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h())
-                boost_m_nl_fofR[index_l, index_z]= pofk_enhancement       (self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h(),hasBug=self.use_bug)
+#            boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
+#            for index_l, index_z in index_pknn:
+#                boost_m_nl_fofR[index_l, index_z]= pofk_enhancement(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h(),hasBug=self.use_bug)
+#
+#            Pk *= boost_m_nl_fofR
 
-            if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']):
-                data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
-
-            Pk *= boost_m_nl_fofR
-
+            fofR_zmax = 2
+            fofR_kmax = 10*cosmo.h() #In 1/Mpc
+            fofR_boost = lambda k_l, z_l: pofk_enhancement(z_l, f_R0, k_l / cosmo.h(), hasBug = self.use_bug)
 
         elif self.use_fofR in ['Forge','Forge_corr']:
             print("f(R) active with Forge emulator")
@@ -449,14 +467,9 @@ class euclid_photometric_z_fofr(Likelihood):
             Bk_interp = RectBivariateSpline(redshifts,k_forge,Bk)
 
             boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
-            boost_m_l_fofR  = np.zeros((self.lbin, self.nzmax), 'float64')
 
             for index_l, index_z in index_pknn:
-                boost_m_l_fofR [index_l, index_z]= pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/hubble)
                 boost_m_nl_fofR[index_l, index_z]= Bk_interp(self.z[index_z],k[index_l,index_z]/hubble)
-
-            if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']):
-                data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
 
             Pk *= boost_m_nl_fofR
 
@@ -475,7 +488,6 @@ class euclid_photometric_z_fofr(Likelihood):
 
             # Empty arrays to store nonlinear and linear boosts
             boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
-            boost_m_l_fofR  = np.zeros((self.lbin, self.nzmax), 'float64')
 
             # Set parameters for the emulator
             lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
@@ -569,11 +581,8 @@ class euclid_photometric_z_fofr(Likelihood):
 
             # Fill up boost array
             for index_l, index_z in index_pknn:
-                boost_m_l_fofR [index_l, index_z]= pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h())
                 boost_m_nl_fofR[index_l, index_z] = Bk_interp(self.z[index_z],k[index_l,index_z]/hubble)
 
-            if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']):
-                data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
 
             # Apply the boost
             Pk *= boost_m_nl_fofR
@@ -585,7 +594,6 @@ class euclid_photometric_z_fofr(Likelihood):
             lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
             f_R0=np.power(10,-1*lgfR0)
             boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
-            boost_m_l_fofR  = np.zeros((self.lbin, self.nzmax), 'float64')
 
             Omc = cosmo.Omega0_cdm()
             Omb = cosmo.Omega_b()
@@ -626,16 +634,69 @@ class euclid_photometric_z_fofr(Likelihood):
                     emantis_boost[:,:,i] = pred_kmax[:,:,0]
 
             for index_l, index_z in index_pknn:
-                boost_m_l_fofR[index_l, index_z] = pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/hubble)
-
                 # Select the required z and k.
                 idx_k_flat = np.ravel_multi_index((index_l, index_z), k.shape)
                 boost_m_nl_fofR[index_l, index_z] = emantis_boost[index_z, 0, idx_k_flat]
 
+            # Apply the boost
+            Pk *= boost_m_nl_fofR
+
+        #Obtain derived quantity
+        if self.use_fofR != False:
             if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']):
                 data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
 
-            # Apply the boost
+        ##########################################
+        # Extrapolation for the Different boosts #
+        ##########################################
+        """
+        The idea here is to fit a power law curve to the edges of the generic function giving us the boost.
+        This is done by calculateing the boost on a grid close to the edges and then fitting a line.
+        Interpolating the line gives us the power law everywhere outside the boost edges
+        To be safe the boost is caped at 2
+        """
+        
+
+        Extrapolate = True
+        if self.use_fofR != False and Extrapolate:
+            # Setup the grid on which we will do the fitting
+            k_cut = np.geomspace(0.8*fofR_kmax,fofR_kmax,5)
+            z_cut = np.linspace(0.8*fofR_zmax,fofR_zmax ,5)
+            k_long= np.geomspace(0.01,fofR_kmax,5*self.fofR_interpolation_k_boost)
+            z_long= np.linspace(0,fofR_zmax,5*self.fofR_interpolation_z_boost)
+
+            # linear extrapolation in log log
+            logk_cut= np.log(k_cut)
+            logz_cut= np.log(z_cut)
+            # k extrapolation -> grid : k_cut, z_long
+            logBoostk = np.ones((5,5*self.fofR_interpolation_z_boost))
+            k_power = []
+            for iz, zi in enumerate(z_long):
+                for ik, ki in enumerate(k_cut):
+                    logBoostk[ik,iz] = np.log(fofR_boost(ki,zi))
+                #fix boost at highest k to emulator value
+                popt, _= curve_fit(lambda x,gamma : logBoostk[-1,iz]+gamma*(x-logk_cut[-1]),logk_cut,logBoostk[:,iz])
+                k_power.append(popt[0])
+            gammak_z =interp1d(z_long,k_power)
+
+            # z extrapolation -> grid : k_long, z_cut
+            logBoostz = np.ones((5*self.fofR_interpolation_k_boost,5))
+            z_power = []
+            for ik, ki in enumerate(k_long):
+                for iz, zi in enumerate(z_cut):
+                    logBoostz[ik,iz] = np.log(fofR_boost(ki,zi))
+                #fix boost at highest z to emulator value
+                popt, _= curve_fit(lambda x,gamma : logBoostz[ik,-1]+gamma*(x-logz_cut[-1]),logz_cut,logBoostz[ik,:])
+                z_power.append(popt[0])
+            gammaz_k =interp1d(k_long,z_power)
+
+            # Of course I still love him
+            def Boost_extrapolation(k,z):
+                    return np.clip(fofR_boost(np.clip(k,0.01,fofR_kmax),np.minimum(z,fofR_zmax))*(np.maximum(z,fofR_zmax)/fofR_zmax)**gammaz_k(np.clip(k,0.01,fofR_kmax))*(np.maximum(k,fofR_kmax)/fofR_kmax)**gammak_z(np.minimum(z,fofR_zmax)),1,2)
+
+            boost_m_nl_fofR = np.ones_like(k)
+            for index_l, index_z in index_pknn:
+                boost_m_nl_fofR[index_l,index_z] = Boost_extrapolation(k[index_l,index_z],self.z[index_z])
             Pk *= boost_m_nl_fofR
 
 
