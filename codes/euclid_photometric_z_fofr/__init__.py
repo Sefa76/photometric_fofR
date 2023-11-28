@@ -15,7 +15,7 @@ from scipy.interpolate import interp1d, RectBivariateSpline
 
 import sys,os
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))
-from montepython.MGfit_Winther import pofk_enhancement ,pofk_enhancement_linear , kazuya_correktion 
+from montepython.MGfit_Winther import pofk_enhancement ,pofk_enhancement_linear , kazuya_correktion
 from montepython.forge_emulator.FORGE_emulator import FORGE
 
 
@@ -224,7 +224,7 @@ class euclid_photometric_z_fofr(Likelihood):
             if self.use_fofR in ['Forge','Forge_corr']:
                 self.forge = FORGE()
                 self.forge_norm_Bk = None
-            
+
             if self.use_fofR == 'ReACT':
                 self.cp_nn = cosmopower_NN(restore=True,restore_filename='./montepython/react/react_boost_spph_nn_wide_100k_mt')
 
@@ -382,7 +382,7 @@ class euclid_photometric_z_fofr(Likelihood):
             boost_m_l_fofR  = np.zeros((self.lbin, self.nzmax), 'float64')
 
             for index_l, index_z in index_pknn:
-                boost_m_l_fofR [index_l, index_z]= pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h()) 
+                boost_m_l_fofR [index_l, index_z]= pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h())
                 boost_m_nl_fofR[index_l, index_z]= pofk_enhancement       (self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h(),hasBug=self.use_bug)
 
             if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']):
@@ -403,10 +403,13 @@ class euclid_photometric_z_fofr(Likelihood):
 
             Omc = cosmo.Omega0_cdm()
             Omb = cosmo.Omega_b()
+            #Adding massive neutrinos for concistancy
+            Omnu = cosmo.Omega_nu
+
             hubble = cosmo.h()
             pars_dict={'sigma8': cosmo.sigma8(),
                        'h': hubble,
-                       'Omega_m': Omc+Omb}
+                       'Omega_m': Omc+Omb+Omnu}
 
             forge_bounds={'Omega_m': [0.18, 0.55],
                           'sigma8': [0.6, 1.0],
@@ -487,8 +490,8 @@ class euclid_photometric_z_fofr(Likelihood):
             Om = (Omc + Omb + Omnu)  # Choosing total matter to include neutrino fraction
             Ob = Omb
             Onu = 0.0 # set omega_nu = 0 in the reaction
-        
-            primordial = cosmo.get_current_derived_parameters(['A_s','n_s'])    
+
+            primordial = cosmo.get_current_derived_parameters(['A_s','n_s'])
             myAs = primordial['A_s']
             myns = primordial['n_s']
             myH0 = hubble*100
@@ -586,8 +589,16 @@ class euclid_photometric_z_fofr(Likelihood):
 
             Omc = cosmo.Omega0_cdm()
             Omb = cosmo.Omega_b()
-            Omm = Omc + Omb
+            #Adding Massive neutrinos for consistency
+            Omnu = cosmo.Omega_nu
+            Omm = Omc + Omb + Omnu
             hubble = cosmo.h()
+
+            # Doing constant extrapolation outside of emmulaor bounds
+            emantis_bounds = {'Omegam' : [0.24,0.39],
+                              'sigma8' : [0.60,1.00]}
+            emantis_Omm = np.clip(Omm,emantis_bounds['Omegam'][0],emantis_bounds['Omegam'][1])
+            emantis_s8  = np.clip(cosmo.sigma8(),emantis_bounds['sigma8'][0],emantis_bounds['sigma8'][1])
 
             # Get e-mantis predictions for all z and k.
 
@@ -602,7 +613,7 @@ class euclid_photometric_z_fofr(Likelihood):
             k_extrap_idx = k_flat > kmax
 
             # Get emantis predictions for k<=kmax.
-            pred = self.emantis.predict_boost(Omm, cosmo.sigma8(), lgfR0, 1/(1+self.z), k_flat[~k_extrap_idx]/hubble)
+            pred = self.emantis.predict_boost(emantis_Omm, emantis_s8, lgfR0, 1/(1+self.z), k_flat[~k_extrap_idx]/hubble)
             emantis_boost[:,:,~k_extrap_idx] = pred
 
             # Constant extrapolation for k>kmax.
@@ -638,9 +649,9 @@ class euclid_photometric_z_fofr(Likelihood):
             log10Mc = data.mcmc_parameters['log10Mc']['current'] * data.mcmc_parameters['log10Mc']['scale']
             thej = data.mcmc_parameters['thej']['current'] * data.mcmc_parameters['thej']['scale']
             deta = data.mcmc_parameters['deta']['current'] * data.mcmc_parameters['deta']['scale']
-            nu_log10Mc = 0.0
-            nu_thej = 0.0 
-            nu_deta = 0.0 
+            nu_log10Mc = 0
+            nu_thej = 0
+            nu_deta = 0
 
             bcemu_dict ={
             'log10Mc' : log10Mc,
@@ -678,7 +689,7 @@ class euclid_photometric_z_fofr(Likelihood):
             if deta / 3**nu_deta < 0.05 or deta / 3**nu_deta > 0.4 :
                 if self.verbose: print(" /!\ Skipping point because BF parameters are out of bounds!")
                 return -1e10
-            
+
             kmin_in_inv_Mpc = self.k_min_h_by_Mpc * cosmo.h()
             kmin_bfc = 0.035
             kmax_bfc = 12.5
