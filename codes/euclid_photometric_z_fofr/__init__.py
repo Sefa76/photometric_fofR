@@ -147,7 +147,7 @@ class euclid_photometric_z_fofr(Likelihood):
 
         self.forge = None
 
-        if self.use_BCemu or self.model_use_BCemu:
+        if self.use_BCemu or self.data_use_BCemu:
             self.nuisance += ['log10Mc']
             self.nuisance += ['thej']
             self.nuisance += ['deta']
@@ -215,9 +215,9 @@ class euclid_photometric_z_fofr(Likelihood):
                                 line = fid_file.readline()
 
         else:
-            if self.fit_diffrent_data:
-                self.use_fofR = self.model_use_fofR
-                self.use_BCemu= self.model_use_BCemu
+            if self.fit_different_data:
+                self.use_fofR = self.data_use_fofR
+                self.use_BCemu= self.data_use_BCemu
 
         ## different non linear models
         if self.use_fofR != False:

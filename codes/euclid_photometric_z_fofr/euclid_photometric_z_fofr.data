@@ -86,7 +86,7 @@ euclid_photometric_z_fofr.BCemu_k_bins = 200
 euclid_photometric_z_fofr.BCemu_z_bins = 20
 
 # model shift checks 
-euclid_photometric_z_fofr.fit_diffrent_data = False
+euclid_photometric_z_fofr.fit_different_data = False
 #########################
-euclid_photometric_z_fofr.model_use_fofR = 'Winther'
-euclid_photometric_z_fofr.model_use_BCemu= True
+euclid_photometric_z_fofr.data_use_fofR = 'Winther'
+euclid_photometric_z_fofr.data_use_BCemu= True
