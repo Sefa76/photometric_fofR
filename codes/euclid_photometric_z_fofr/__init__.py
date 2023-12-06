@@ -12,10 +12,12 @@ from montepython.likelihood_class import Likelihood
 from scipy.integrate import trapz,simpson
 from scipy import interpolate as itp
 from scipy.interpolate import interp1d, RectBivariateSpline
+from scipy.optimize import curve_fit
+from itertools import product
 
 import sys,os
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))
-from montepython.MGfit_Winther import pofk_enhancement ,pofk_enhancement_linear , kazuya_correktion 
+from montepython.MGfit_Winther import pofk_enhancement ,pofk_enhancement_linear , kazuya_correktion
 from montepython.forge_emulator.FORGE_emulator import FORGE
 
 
@@ -145,7 +147,7 @@ class euclid_photometric_z_fofr(Likelihood):
 
         self.forge = None
 
-        if self.use_BCemu or self.model_use_BCemu:
+        if self.use_BCemu or self.data_use_BCemu:
             self.nuisance += ['log10Mc']
             self.nuisance += ['thej']
             self.nuisance += ['deta']
@@ -213,9 +215,9 @@ class euclid_photometric_z_fofr(Likelihood):
                                 line = fid_file.readline()
 
         else:
-            if self.fit_diffrent_data:
-                self.use_fofR = self.model_use_fofR
-                self.use_BCemu= self.model_use_BCemu
+            if self.fit_different_data:
+                self.use_fofR = self.data_use_fofR
+                self.use_BCemu= self.data_use_BCemu
 
         ## different non linear models
         if self.use_fofR != False:
@@ -224,7 +226,7 @@ class euclid_photometric_z_fofr(Likelihood):
             if self.use_fofR in ['Forge','Forge_corr']:
                 self.forge = FORGE()
                 self.forge_norm_Bk = None
-            
+
             if self.use_fofR == 'ReACT':
                 self.cp_nn = cosmopower_NN(restore=True,restore_filename='./montepython/react/react_boost_spph_nn_wide_100k_mt')
 
@@ -234,7 +236,10 @@ class euclid_photometric_z_fofr(Likelihood):
 
                 # extrapolate_k: linear extrapolation in B-log10(k) for k < kmin=0.03, since sometimes the boost is not exactly equal to one for k=kmin.
                 # The extrapolation is done until the boost reaches B=1.
-                self.emantis = FofrBoost(verbose=True, extrapolate_aexp=True, extrapolate_low_k=True)
+                # self.emantis = FofrBoost(verbose=True, extrapolate_aexp=True, extrapolate_low_k=True)
+
+                # the high z-extrapolation is now done in the likelihood code as a power law
+                self.emantis = FofrBoost(verbose=True, extrapolate_aexp=False, extrapolate_low_k=True)
 
         return
 
@@ -276,6 +281,24 @@ class euclid_photometric_z_fofr(Likelihood):
         return (term1+term2+term3+term4)/(2*c0*cb)
 
     def get_sigma8_fofR(self,k,Pk,h,lgfR0):
+        """ Obtain the MG eqivalent of sigma8 calculated with the winther fitting formula and corrected for by matching MGCAMB
+
+        Parameters
+        ----------
+        k : numpy.ndarray
+            list of k values used in the interal calculations in 1/Mpc
+        Pk: numpy.ndarray
+            linear LCDM power spectrum at z=0 on the grid
+        h : float
+            Vaule of the reduced hubble constant
+        lgfR0: float
+            Absolute value of the log10 of the absolute value of f_R0
+
+        Returns
+        -------
+        float
+            MG eqivalent of sigma8
+        """
 
         x = k*8/h
         #Get Sigma windowfunktion
@@ -378,18 +401,16 @@ class euclid_photometric_z_fofr(Likelihood):
             print("f(R) active with Winther fitting function")
             lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
             f_R0=np.power(10,-1*lgfR0)
-            boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
-            boost_m_l_fofR  = np.zeros((self.lbin, self.nzmax), 'float64')
 
-            for index_l, index_z in index_pknn:
-                boost_m_l_fofR [index_l, index_z]= pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h()) 
-                boost_m_nl_fofR[index_l, index_z]= pofk_enhancement       (self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h(),hasBug=self.use_bug)
+#            boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
+#            for index_l, index_z in index_pknn:
+#                boost_m_nl_fofR[index_l, index_z]= pofk_enhancement(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h(),hasBug=self.use_bug)
+#
+#            Pk *= boost_m_nl_fofR
 
-            if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']):
-                data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
-
-            Pk *= boost_m_nl_fofR
-
+            fofR_zmax = 2
+            fofR_kmax = 10*cosmo.h() #In 1/Mpc
+            fofR_boost = lambda k_l, z_l: pofk_enhancement(z_l, f_R0, k_l / cosmo.h(), hasBug = self.use_bug)
 
         elif self.use_fofR in ['Forge','Forge_corr']:
             print("f(R) active with Forge emulator")
@@ -403,10 +424,13 @@ class euclid_photometric_z_fofr(Likelihood):
 
             Omc = cosmo.Omega0_cdm()
             Omb = cosmo.Omega_b()
+            #Adding massive neutrinos for concistancy
+            Omnu = cosmo.Omega_nu
+
             hubble = cosmo.h()
             pars_dict={'sigma8': cosmo.sigma8(),
                        'h': hubble,
-                       'Omega_m': Omc+Omb}
+                       'Omega_m': Omc+Omb+Omnu}
 
             forge_bounds={'Omega_m': [0.18, 0.55],
                           'sigma8': [0.6, 1.0],
@@ -445,17 +469,16 @@ class euclid_photometric_z_fofr(Likelihood):
 
             Bk_interp = RectBivariateSpline(redshifts,k_forge,Bk)
 
-            boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
-            boost_m_l_fofR  = np.zeros((self.lbin, self.nzmax), 'float64')
+            fofR_zmax = 2
+            fofR_kmax = 10*cosmo.h() #In 1/Mpc
+            fofR_boost = lambda k_l, z_l: Bk_interp(z_l, k_l / cosmo.h())
 
-            for index_l, index_z in index_pknn:
-                boost_m_l_fofR [index_l, index_z]= pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/hubble)
-                boost_m_nl_fofR[index_l, index_z]= Bk_interp(self.z[index_z],k[index_l,index_z]/hubble)
+            # boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
 
-            if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']):
-                data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
+            # for index_l, index_z in index_pknn:
+            #     boost_m_nl_fofR[index_l, index_z]= Bk_interp(self.z[index_z],k[index_l,index_z]/hubble)
 
-            Pk *= boost_m_nl_fofR
+            # Pk *= boost_m_nl_fofR
 
 
         if self.use_fofR == 'ReACT':
@@ -472,7 +495,6 @@ class euclid_photometric_z_fofr(Likelihood):
 
             # Empty arrays to store nonlinear and linear boosts
             boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
-            boost_m_l_fofR  = np.zeros((self.lbin, self.nzmax), 'float64')
 
             # Set parameters for the emulator
             lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
@@ -487,8 +509,8 @@ class euclid_photometric_z_fofr(Likelihood):
             Om = (Omc + Omb + Omnu)  # Choosing total matter to include neutrino fraction
             Ob = Omb
             Onu = 0.0 # set omega_nu = 0 in the reaction
-        
-            primordial = cosmo.get_current_derived_parameters(['A_s','n_s'])    
+
+            primordial = cosmo.get_current_derived_parameters(['A_s','n_s'])
             myAs = primordial['A_s']
             myns = primordial['n_s']
             myH0 = hubble*100
@@ -538,42 +560,44 @@ class euclid_photometric_z_fofr(Likelihood):
             Boost = np.maximum(1.0,self.cp_nn.predictions_np(params_cp))
             kvals = self.cp_nn.modes
 
-            # Extrapolate to high values of k
-            # Values to extrapolate to
-            mykmax = 50
-            mykmin = kvals[-1]+0.01
-            N_grid = 300
+            ReACT_interp = RectBivariateSpline(self.z,kvals,Boost)
+            fofR_zmax = 2
+            fofR_kmax = 3*cosmo.h() #In 1/Mpc
+            fofR_boost = lambda k_l, z_l: ReACT_interp(z_l, k_l / cosmo.h())
 
-            # Create k bins at which to extrapolate to
-            k_extrapolate = np.linspace(mykmin, mykmax , N_grid)
+            # # Extrapolate to high values of k
+            # # Values to extrapolate to
+            # mykmax = 50
+            # mykmin = kvals[-1]+0.01
+            # N_grid = 300
 
-            # Array to store extrapolated values
-            Bk_ext=[]
+            # # Create k bins at which to extrapolate to
+            # k_extrapolate = np.linspace(mykmin, mykmax , N_grid)
 
-            #Extrapolate only for redshifts where boost is non-trivial, otherwise it is 1
-            for index_z in range(nz_Pk):
-                if(self.z[index_z]<=zmax):
-                    Bk_ext.append(interp1d(kvals,Boost[index_z],fill_value='extrapolate')(k_extrapolate))
-                else:
-                    Bk_ext.append(np.ones(N_grid))
+            # # Array to store extrapolated values
+            # Bk_ext=[]
 
-            # Attach extended k-grid and boosts to emulator's grid and boosts
-            concatenated_boost = np.hstack((Boost,Bk_ext))
-            concatenated_k = np.hstack((kvals, k_extrapolate))
+            # #Extrapolate only for redshifts where boost is non-trivial, otherwise it is 1
+            # for index_z in range(nz_Pk):
+            #     if(self.z[index_z]<=zmax):
+            #         Bk_ext.append(interp1d(kvals,Boost[index_z],fill_value='extrapolate')(k_extrapolate))
+            #     else:
+            #         Bk_ext.append(np.ones(N_grid))
 
-            # Spline final function which now extends to mykmax using a power law extrapolation
-            Bk_interp = RectBivariateSpline(self.z,concatenated_k,concatenated_boost)
+            # # Attach extended k-grid and boosts to emulator's grid and boosts
+            # concatenated_boost = np.hstack((Boost,Bk_ext))
+            # concatenated_k = np.hstack((kvals, k_extrapolate))
 
-            # Fill up boost array
-            for index_l, index_z in index_pknn:
-                boost_m_l_fofR [index_l, index_z]= pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h())
-                boost_m_nl_fofR[index_l, index_z] = Bk_interp(self.z[index_z],k[index_l,index_z]/hubble)
+            # # Spline final function which now extends to mykmax using a power law extrapolation
+            # Bk_interp = RectBivariateSpline(self.z,concatenated_k,concatenated_boost)
 
-            if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']):
-                data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
+            # # Fill up boost array
+            # for index_l, index_z in index_pknn:
+            #     boost_m_nl_fofR[index_l, index_z] = Bk_interp(self.z[index_z],k[index_l,index_z]/hubble)
 
-            # Apply the boost
-            Pk *= boost_m_nl_fofR
+
+            # # Apply the boost
+            # Pk *= boost_m_nl_fofR
 
 
         elif self.use_fofR == 'emantis':
@@ -582,49 +606,117 @@ class euclid_photometric_z_fofr(Likelihood):
             lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
             f_R0=np.power(10,-1*lgfR0)
             boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
-            boost_m_l_fofR  = np.zeros((self.lbin, self.nzmax), 'float64')
 
             Omc = cosmo.Omega0_cdm()
             Omb = cosmo.Omega_b()
-            Omm = Omc + Omb
+            #Adding Massive neutrinos for consistency
+            Omnu = cosmo.Omega_nu
+            Omm = Omc + Omb + Omnu
             hubble = cosmo.h()
 
-            # Get e-mantis predictions for all z and k.
+            # Doing constant extrapolation outside of emmulaor bounds
+            emantis_bounds = {'Omegam' : [0.24,0.39],
+                              'sigma8' : [0.60,1.00]}
+            emantis_Omm = np.clip(Omm,emantis_bounds['Omegam'][0],emantis_bounds['Omegam'][1])
+            emantis_s8  = np.clip(cosmo.sigma8(),emantis_bounds['sigma8'][0],emantis_bounds['sigma8'][1])
 
-            # Flatten k array.
-            k_flat = np.ravel(k)
+            # Get e-mantis predictions for all z and k within emulator bounds
+            fofR_kmax =  self.emantis.kbins[-1]*hubble
+            fofR_zmax = 2
 
-            # Init. emantis prediction array.
-            emantis_boost = np.ones((self.z.shape[0], 1, k_flat.shape[0]))
+            k_grid_emantis = np.geomspace(0.01,fofR_kmax,100)
+            z_grid_emantis = self.z[self.z <= fofR_zmax]
 
-            # k indices outside emantis range (k>kmax).
-            kmax = self.emantis.kbins[-1]*hubble
-            k_extrap_idx = k_flat > kmax
+            # k indices within emantis range (k<kmax)
+            B_grid_emantis = self.emantis.predict_boost(emantis_Omm, emantis_s8, lgfR0, 1/(1+z_grid_emantis), k_grid_emantis/hubble)
+            interp_Boost = RectBivariateSpline(z_grid_emantis,k_grid_emantis,B_grid_emantis[:,0,:])
 
-            # Get emantis predictions for k<=kmax.
-            pred = self.emantis.predict_boost(Omm, cosmo.sigma8(), lgfR0, 1/(1+self.z), k_flat[~k_extrap_idx]/hubble)
-            emantis_boost[:,:,~k_extrap_idx] = pred
+            fofR_boost = lambda k, z: interp_Boost(z,k)
 
-            # Constant extrapolation for k>kmax.
-            # This seems like a messy way to do it, but in any case it should be replaced by a common extrapolation
-            # for all types of predictions.
-            # Get emantis predictions for k=kmax.
-            pred_kmax = self.emantis.predict_boost(Omm, cosmo.sigma8(), lgfR0, 1/(1+self.z), kmax/hubble)
-            for i in range(k_flat.shape[0]):
-                if k_extrap_idx[i]:
-                    emantis_boost[:,:,i] = pred_kmax[:,:,0]
+            # # Init. emantis prediction array.
+            # emantis_boost = np.ones((self.z.shape[0], 1, k_flat.shape[0]))
 
-            for index_l, index_z in index_pknn:
-                boost_m_l_fofR[index_l, index_z] = pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/hubble)
+            # # Flatten k array.
+            # k_flat = np.ravel(k)
+            # k_extrap_idx = k_flat > kmax
 
-                # Select the required z and k.
-                idx_k_flat = np.ravel_multi_index((index_l, index_z), k.shape)
-                boost_m_nl_fofR[index_l, index_z] = emantis_boost[index_z, 0, idx_k_flat]
+            # pred= self.emantis.predict_boost(emantis_Omm, emantis_s8, lgfR0, 1/(1+self.z), k_flat[~k_extrap_idx]/hubble)
+            # emantis_boost[:,:,~k_extrap_idx] = pred
 
+
+            # # Constant extrapolation for k>kmax.
+            # # This seems like a messy way to do it, but in any case it should be replaced by a common extrapolation
+            # # for all types of predictions.
+            # # Get emantis predictions for k=kmax.
+            # pred_kmax = self.emantis.predict_boost(Omm, cosmo.sigma8(), lgfR0, 1/(1+self.z), kmax/hubble)
+            # for i in range(k_flat.shape[0]):
+            #     if k_extrap_idx[i]:
+            #         emantis_boost[:,:,i] = pred_kmax[:,:,0]
+
+            # for index_l, index_z in index_pknn:
+            #     # Select the required z and k.
+            #     idx_k_flat = np.ravel_multi_index((index_l, index_z), k.shape)
+            #     boost_m_nl_fofR[index_l, index_z] = emantis_boost[index_z, 0, idx_k_flat]
+
+            # # Apply the boost
+            # Pk *= boost_m_nl_fofR
+
+        #Obtain derived quantity
+        if self.use_fofR != False:
             if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']):
                 data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
 
-            # Apply the boost
+        ##########################################
+        # Extrapolation for the Different boosts #
+        ##########################################
+        """
+        The idea here is to fit a power law curve to the edges of the generic function giving us the boost.
+        This is done by calculateing the boost on a grid close to the edges and then fitting a line.
+        Interpolating the line gives us the power law everywhere outside the boost edges
+        To be safe the boost is caped at 2
+        """
+
+
+        Extrapolate = True
+        if self.use_fofR != False and Extrapolate:
+            # Setup the grid on which we will do the fitting
+            k_cut = np.geomspace(0.8*fofR_kmax,fofR_kmax,5)
+            z_cut = np.linspace(0.8*fofR_zmax,fofR_zmax ,5)
+            k_long= np.geomspace(0.01,fofR_kmax,5*self.fofR_interpolation_k_boost)
+            z_long= np.linspace(0,fofR_zmax,5*self.fofR_interpolation_z_boost)
+
+            # linear extrapolation in log log
+            logk_cut= np.log(k_cut)
+            logz_cut= np.log(z_cut)
+            # k extrapolation -> grid : k_cut, z_long
+            logBoostk = np.ones((5,5*self.fofR_interpolation_z_boost))
+            k_power = []
+            for iz, zi in enumerate(z_long):
+                for ik, ki in enumerate(k_cut):
+                    logBoostk[ik,iz] = np.log(fofR_boost(ki,zi))
+                #fix boost at highest k to emulator value
+                popt, _= curve_fit(lambda x,gamma : logBoostk[-1,iz]+gamma*(x-logk_cut[-1]),logk_cut,logBoostk[:,iz])
+                k_power.append(popt[0])
+            gammak_z =interp1d(z_long,k_power)
+
+            # z extrapolation -> grid : k_long, z_cut
+            logBoostz = np.ones((5*self.fofR_interpolation_k_boost,5))
+            z_power = []
+            for ik, ki in enumerate(k_long):
+                for iz, zi in enumerate(z_cut):
+                    logBoostz[ik,iz] = np.log(fofR_boost(ki,zi))
+                #fix boost at highest z to emulator value
+                popt, _= curve_fit(lambda x,gamma : logBoostz[ik,-1]+gamma*(x-logz_cut[-1]),logz_cut,logBoostz[ik,:])
+                z_power.append(popt[0])
+            gammaz_k =interp1d(k_long,z_power)
+
+            # Of course I still love him
+            def Boost_extrapolation(k,z):
+                    return np.clip(fofR_boost(np.clip(k,0.01,fofR_kmax),np.minimum(z,fofR_zmax))*(np.maximum(z,fofR_zmax)/fofR_zmax)**gammaz_k(np.clip(k,0.01,fofR_kmax))*(np.maximum(k,fofR_kmax)/fofR_kmax)**gammak_z(np.minimum(z,fofR_zmax)),1,2)
+
+            boost_m_nl_fofR = np.ones_like(k)
+            for index_l, index_z in index_pknn:
+                boost_m_nl_fofR[index_l,index_z] = Boost_extrapolation(k[index_l,index_z],self.z[index_z])
             Pk *= boost_m_nl_fofR
 
 
@@ -638,9 +730,9 @@ class euclid_photometric_z_fofr(Likelihood):
             log10Mc = data.mcmc_parameters['log10Mc']['current'] * data.mcmc_parameters['log10Mc']['scale']
             thej = data.mcmc_parameters['thej']['current'] * data.mcmc_parameters['thej']['scale']
             deta = data.mcmc_parameters['deta']['current'] * data.mcmc_parameters['deta']['scale']
-            nu_log10Mc = 0.0
-            nu_thej = 0.0 
-            nu_deta = 0.0 
+            nu_log10Mc = 0
+            nu_thej = 0
+            nu_deta = 0
 
             bcemu_dict ={
             'log10Mc' : log10Mc,
@@ -678,7 +770,7 @@ class euclid_photometric_z_fofr(Likelihood):
             if deta / 3**nu_deta < 0.05 or deta / 3**nu_deta > 0.4 :
                 if self.verbose: print(" /!\ Skipping point because BF parameters are out of bounds!")
                 return -1e10
-            
+
             kmin_in_inv_Mpc = self.k_min_h_by_Mpc * cosmo.h()
             kmin_bfc = 0.035
             kmax_bfc = 12.5
