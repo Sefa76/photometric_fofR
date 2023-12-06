@@ -236,7 +236,10 @@ class euclid_photometric_z_fofr(Likelihood):
 
                 # extrapolate_k: linear extrapolation in B-log10(k) for k < kmin=0.03, since sometimes the boost is not exactly equal to one for k=kmin.
                 # The extrapolation is done until the boost reaches B=1.
-                self.emantis = FofrBoost(verbose=True, extrapolate_aexp=True, extrapolate_low_k=True)
+                # self.emantis = FofrBoost(verbose=True, extrapolate_aexp=True, extrapolate_low_k=True)
+
+                # the high z-extrapolation is now done in the likelihood code as a power law
+                self.emantis = FofrBoost(verbose=True, extrapolate_aexp=False, extrapolate_low_k=True)
 
         return
 
@@ -617,19 +620,19 @@ class euclid_photometric_z_fofr(Likelihood):
             emantis_Omm = np.clip(Omm,emantis_bounds['Omegam'][0],emantis_bounds['Omegam'][1])
             emantis_s8  = np.clip(cosmo.sigma8(),emantis_bounds['sigma8'][0],emantis_bounds['sigma8'][1])
 
-            # Get e-mantis predictions for all z and k.
-
-            # k indices outside emantis range (k>kmax).
-            kmax = self.emantis.kbins[-1]*hubble
-            k_grid_emantis = np.geomspace(0.01,kmax,100)
-            B_grid_emantis = self.emantis.predict_boost(emantis_Omm, emantis_s8, lgfR0, 1/(1+self.z), k_grid_emantis/hubble)
-            interp_Boost = RectBivariateSpline(self.z,k_grid_emantis,B_grid_emantis[:,0,:])
-            # Get emantis predictions for k<=kmax.
-
+            # Get e-mantis predictions for all z and k within emulator bounds
+            fofR_kmax =  self.emantis.kbins[-1]*hubble
             fofR_zmax = 2
-            fofR_kmax = kmax #In 1/Mpc
+
+            k_grid_emantis = np.geomspace(0.01,fofR_kmax,100)
+            z_grid_emantis = self.z[self.z <= fofR_zmax]
+
+            # k indices within emantis range (k<kmax)
+            B_grid_emantis = self.emantis.predict_boost(emantis_Omm, emantis_s8, lgfR0, 1/(1+z_grid_emantis), k_grid_emantis/hubble)
+            interp_Boost = RectBivariateSpline(z_grid_emantis,k_grid_emantis,B_grid_emantis[:,0,:])
+
             fofR_boost = lambda k, z: interp_Boost(z,k)
-            
+
             # # Init. emantis prediction array.
             # emantis_boost = np.ones((self.z.shape[0], 1, k_flat.shape[0]))
 
@@ -672,7 +675,7 @@ class euclid_photometric_z_fofr(Likelihood):
         Interpolating the line gives us the power law everywhere outside the boost edges
         To be safe the boost is caped at 2
         """
-        
+
 
         Extrapolate = True
         if self.use_fofR != False and Extrapolate:
