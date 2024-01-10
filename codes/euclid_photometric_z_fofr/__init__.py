@@ -17,6 +17,7 @@ import sys,os
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))
 from montepython.MGfit_Winther import pofk_enhancement, pofk_enhancement_linear, kazuya_correktion
 from montepython.forge_emulator.FORGE_emulator import FORGE
+from time import time
 
 try:
     import cosmopower as cp
@@ -309,6 +310,10 @@ class euclid_photometric_z_fofr(Likelihood):
 
     def loglkl(self, cosmo, data):
 
+        printtimes = False
+        if printtimes:
+            t_start = time()
+
         # One wants to obtain here the relation between z and r, this is done
         # by asking the cosmological module with the function z_of_r
         self.r = np.zeros(self.nzmax, 'float64')
@@ -352,6 +357,10 @@ class euclid_photometric_z_fofr(Likelihood):
                     self.bias[ibin] = data.mcmc_parameters[self.bias_names[ibin]]['current']*data.mcmc_parameters[self.bias_names[ibin]]['scale']
                 self.biasfunc = interp1d(self.z_bin_center, self.bias, bounds_error=False, fill_value="extrapolate")
 
+        if printtimes:
+            t_init = time()
+            print("Initalisation Time:", t_init-t_start)
+
         ######################
         # Get power spectrum #
         ######################
@@ -382,6 +391,10 @@ class euclid_photometric_z_fofr(Likelihood):
             pk_m_l [index_l, index_z] = Pk_l (self.z[index_z],k[index_l,index_z])
 
         Pk = pk_m_nl
+
+        if printtimes:
+            t_power = time()
+            print("Power Spectrum obtained in:", t_power-t_init)
 
         ########################
         # Boosts and Emulators #
@@ -575,6 +588,10 @@ class euclid_photometric_z_fofr(Likelihood):
             if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']):
                 data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
 
+        if printtimes:
+            t_boost = time()
+            print("Boost Initialized in:", t_boost-t_power)
+
         ##########################################
         # Extrapolation for the Different boosts #
         ##########################################
@@ -626,6 +643,9 @@ class euclid_photometric_z_fofr(Likelihood):
                 boost_m_nl_fofR[index_l,index_z] = Boost_extrapolation(k[index_l,index_z],self.z[index_z])
             Pk *= boost_m_nl_fofR
 
+        if printtimes:
+            t_extra = time()
+            print("extrapolation done in:", t_extra - t_boost)
 
         if self.use_BCemu:
             # baryonic feedback modifications are only applied to k>kmin_bfc
@@ -699,6 +719,10 @@ class euclid_photometric_z_fofr(Likelihood):
 
             Pk *= boost_m_nl_BCemu
 
+        if printtimes:
+            t_baryon = time()
+            print("Baryonic Feedback calculated in:", t_baryon-t_extra)
+
         ####################
         # Get Growthfactor #
         ####################
@@ -719,6 +743,10 @@ class euclid_photometric_z_fofr(Likelihood):
                 D_z_boost[index_l,index_z] = np.sqrt(pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h()) /\
                                                      pofk_enhancement_linear(              0,f_R0,k[index_l,index_z]/cosmo.h()))
             D_z  *=  D_z_boost
+
+        if printtimes:
+            t_growth = time()
+            print("growthfactor obtained in", t_growth-t_baryon)
 
         ################################################
         # Window functions W_L(l,z,bin) and W_G(z,bin) #
@@ -758,6 +786,10 @@ class euclid_photometric_z_fofr(Likelihood):
                 W_G = np.zeros((self.nzmax, self.nbin), 'float64')
                 W_G =  (H_z * self.biasfunc(self.z))[:,None] * self.eta_z
 
+        if printtimes:
+            t_window = time()
+            print("window function obtained in:", t_window-t_growth)
+
         ###########
         # Calc Cl #
         ###########
@@ -780,6 +812,10 @@ class euclid_photometric_z_fofr(Likelihood):
             Cl_LG_int = W_L[:,:,:,None] * W_G[None,: , None, :] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None]
             Cl_LG     = trapz(Cl_LG_int,self.z,axis=1)[:nell_XC,:,:]
             Cl_GL     = np.transpose(Cl_LG,(0,2,1))
+
+        if printtimes:
+            t_cell = time()
+            print("Cell calculated in:", t_cell-t_window)
 
         ####################
         # Plot Pk and Cl's #
@@ -809,6 +845,10 @@ class euclid_photometric_z_fofr(Likelihood):
                 np.savez(debug_file_path, ells_LL=self.l_WL, Cl_LL = Cl_LL)
             if 'GCph' in self.probe:
                 np.savez(debug_file_path, ells_GG=self.l_GC, Cl_GG = Cl_GG)
+
+        if printtimes:
+            t_debug = time()
+            print("Debug options obtained in:" , t_debug-t_cell)
 
         #########
         # Noise #
@@ -862,6 +902,10 @@ class euclid_photometric_z_fofr(Likelihood):
                 El_LG_int = W_L[:,:,:,None] * W_G[None,: , None, :] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None] * alpha[:,:,None,None]
                 El_LG     = trapz(El_LG_int,self.z,axis=1)[:nell_XC,:,:]
                 El_GL     = np.transpose(El_LG,(0,2,1))
+
+        if printtimes:
+            t_therr = time()
+            print("Theoretical errors obtained in:" , t_therr-t_debug)
 
         #######################
         # Create fiducial file
@@ -933,6 +977,10 @@ class euclid_photometric_z_fofr(Likelihood):
                     T_Rerr = norm * np.block([[inter_LL,inter_LG],[inter_GL,inter_GG[:self.ell_jump,:,:]]])
                     T_Rerr_high = norm * inter_GG[self.ell_jump:,:,:]
 
+        if printtimes:
+            t_spline = time()
+            print("Cell Splined in:", t_spline-t_therr)
+        
         ######################
         # Compute likelihood
         ######################
@@ -956,7 +1004,7 @@ class euclid_photometric_z_fofr(Likelihood):
                 dtilde_the = np.linalg.det(shifted_Cov)
                 d_obs = np.linalg.det(self.Cov_observ)
                 dtilde_mix = np.zeros_like(dtilde_the)
-                for i in range(2*self.nbin):
+                for i in range(2 * self.nbin):
                     newCov = np.copy(shifted_Cov)
                     newCov[:, i] = self.Cov_observ[:, :, i]
                     dtilde_mix += np.linalg.det(newCov)
@@ -982,6 +1030,11 @@ class euclid_photometric_z_fofr(Likelihood):
         eps_l = np.zeros_like(ells)
         if self.theoretical_error != False:
             eps_l = minimize(compute_chisq, eps_l)
+        
+        if printtimes:
+            t_lkl = time()
+            print("Likelihood calculated in:" ,t_lkl-t_spline)
+            print("Total time taken:", t_lkl-t_start)
 
         chi2 = compute_chisq(eps_l)
         print("euclid photometric: chi2 = ",chi2)
