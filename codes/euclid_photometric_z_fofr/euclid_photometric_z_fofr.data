@@ -29,7 +29,7 @@ euclid_photometric_z_fofr.lmin = 10
 #euclid_photometric_z_fofr.lmax_GC=750
 #euclid_photometric_z_fofr.lmax_XC=750
 #
-euclid_photometric_z_fofr.lmax_WL = 4000 
+euclid_photometric_z_fofr.lmax_WL = 4000
 euclid_photometric_z_fofr.lmax_GC = 3000
 euclid_photometric_z_fofr.lmax_XC = 3000
 #
@@ -78,14 +78,17 @@ euclid_photometric_z_fofr.use_MGGrowth = False
 euclid_photometric_z_fofr.fofR_interpolation_k_boost = 40
 euclid_photometric_z_fofr.fofR_interpolation_z_boost = 4
 
-
 # baryonic feedback
 euclid_photometric_z_fofr.verbose = True
 euclid_photometric_z_fofr.use_BCemu = False
 euclid_photometric_z_fofr.BCemu_k_bins = 200
 euclid_photometric_z_fofr.BCemu_z_bins = 20
 
-# model shift checks 
+#Theory Error
+euclid_photometric_z_fofr.theoretical_error = False
+euclid_photometric_z_fofr.fR_error = 0.02
+
+# model shift checks
 euclid_photometric_z_fofr.fit_different_data = False
 #########################
 euclid_photometric_z_fofr.data_use_fofR = 'Winther'

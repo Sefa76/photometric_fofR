@@ -9,13 +9,13 @@
 
 from montepython.likelihood_class import Likelihood
 
-from scipy.integrate import trapz,simpson
+from scipy.integrate import trapz, simpson
 from scipy.interpolate import interp1d, RectBivariateSpline
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, minimize
 
 import sys,os
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))
-from montepython.MGfit_Winther import pofk_enhancement ,pofk_enhancement_linear , kazuya_correktion
+from montepython.MGfit_Winther import pofk_enhancement, pofk_enhancement_linear, kazuya_correktion
 from montepython.forge_emulator.FORGE_emulator import FORGE
 
 try:
@@ -199,7 +199,7 @@ class euclid_photometric_z_fofr(Likelihood):
                         self.Cov_observ = np.block([[inter_LL[:self.ell_jump,:,:],inter_LG],[inter_GL,inter_GG]])
                         self.Cov_observ_high = inter_LL[self.ell_jump:,:,:]
                     else:
-                        self.Cov_observ = np.block([[inter_LL,inter_LG],[inter_GL,inter_GG[:self.ell_jump+1]]])
+                        self.Cov_observ = np.block([[inter_LL,inter_LG],[inter_GL,inter_GG[:self.ell_jump,:,:]]])
                         self.Cov_observ_high = inter_GG[self.ell_jump:,:,:]
 
             except KeyError:
@@ -469,9 +469,6 @@ class euclid_photometric_z_fofr(Likelihood):
 
             print("f(R) active with ReACT")
 
-            # Empty arrays to store nonlinear and linear boosts
-            boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
-
             # Set parameters for the emulator
             lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
             f_R0=np.power(10,-1*lgfR0)
@@ -546,7 +543,6 @@ class euclid_photometric_z_fofr(Likelihood):
 
             lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
             f_R0=np.power(10,-1*lgfR0)
-            boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
 
             Omc = cosmo.Omega0_cdm()
             Omb = cosmo.Omega_b()
@@ -589,9 +585,7 @@ class euclid_photometric_z_fofr(Likelihood):
         To be safe the boost is caped at 2
         """
 
-
-        Extrapolate = True
-        if self.use_fofR != False and Extrapolate:
+        if self.use_fofR != False:
             # Setup the grid on which we will do the fitting
             k_cut = np.geomspace(0.8*fofR_kmax,fofR_kmax,5)
             z_cut = np.linspace(0.8*fofR_zmax,fofR_zmax ,5)
@@ -816,9 +810,9 @@ class euclid_photometric_z_fofr(Likelihood):
             if 'GCph' in self.probe:
                 np.savez(debug_file_path, ells_GG=self.l_GC, Cl_GG = Cl_GG)
 
-        ##########
-        # Noise
-        ##########
+        #########
+        # Noise #
+        #########
         # dimensionless
 
         self.noise = {
@@ -836,6 +830,38 @@ class euclid_photometric_z_fofr(Likelihood):
             if 'WL_GCph_XC' in self.probe:
                 Cl_GL[:,i,i] += self.noise['GL']
                 Cl_LG[:,i,i] += self.noise['LG']
+
+        #####################
+        # Theoretical Error #
+        #####################
+        """If the inclusion of theoretical errors for modified gravity are asked for will follow the description found in 1210.2194.
+        The recepie has been adjusted to also work with the full 3x2pt probe.
+        Any other source of theorerical error must be added seperately in the computation of the relative theoretical error.
+        """
+        if self.theoretical_error != False:
+
+            #calculate the relative theoretical error
+            alpha = np.zeros_like(k)
+            if self.use_fofR != False and self.theoretical_error == 'simple_fR':
+                # In the simple case we set the relative theoretical error to be 2% of the boost
+                alpha = boost_m_nl_fofR*self.fR_error
+
+            else:
+                raise Exception("Theorerical error model not recognized. Please choose from 'simple_fR' or ...")
+
+            # calculate the covariance matrix error
+            if 'WL' in self.probe or 'WL_GCph_XC' in self.probe:
+                El_LL_int = W_L[:,:,:,None] * W_L[:,:,None,:] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None] * alpha[:,:,None,None]
+                El_LL     = trapz(El_LL_int,self.z,axis=1)[:nell_WL,:,:]
+
+            if 'GCph' in self.probe or 'WL_GCph_XC' in self.probe:
+                El_GG_int = W_G[None,:,:,None] * W_G[None,: , None, :] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None] * alpha[:,:,None,None]
+                El_GG     = trapz(El_GG_int,self.z,axis=1)[:nell_GC,:,:]
+
+            if 'WL_GCph_XC' in self.probe:
+                El_LG_int = W_L[:,:,:,None] * W_G[None,: , None, :] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None] * alpha[:,:,None,None]
+                El_LG     = trapz(El_LG_int,self.z,axis=1)[:nell_XC,:,:]
+                El_GL     = np.transpose(El_LG,(0,2,1))
 
         #######################
         # Create fiducial file
@@ -867,9 +893,11 @@ class euclid_photometric_z_fofr(Likelihood):
         if 'WL' in self.probe or 'WL_GCph_XC' in self.probe:
             inter_LL = interp1d(self.l_WL,Cl_LL,axis=0, kind='cubic')(self.ells_WL)
             Cov_theory = inter_LL
+            ells = self.ells_WL
         if 'GCph' in self.probe or 'WL_GCph_XC' in self.probe:
             inter_GG = interp1d(self.l_GC,Cl_GG,axis=0, kind='cubic')(self.ells_GC)
             Cov_theory = inter_GG
+            ells = self.ells_GC
         if 'WL_GCph_XC' in self.probe:
             inter_GL = interp1d(self.l_XC,Cl_GL,axis=0, kind='cubic')(self.ells_XC)
             inter_LG = np.transpose(inter_GL,(0,2,1))
@@ -878,71 +906,87 @@ class euclid_photometric_z_fofr(Likelihood):
                 Cov_theory_high = inter_LL[self.ell_jump:,:,:]
                 ells = self.ells_WL
             else:
-                Cov_theory = np.block([[inter_LL,inter_LG],[inter_GL,inter_GG[:self.ell_jump+1]]])
+                Cov_theory = np.block([[inter_LL,inter_LG],[inter_GL,inter_GG[:self.ell_jump,:,:]]])
                 Cov_theory_high = inter_GG[self.ell_jump:,:,:]
                 ells = self.ells_GC
+
+        T_Rerr = np.zeros_like(Cov_theory)
+        T_Rerr_high = np.zeros_like(Cov_theory_high)
+        if self.theoretical_error != False:
+            # Find the theoretical error matrix for every interger l
+            if 'WL' in self.probe or 'WL_GCph_XC' in self.probe:
+                inter_LL = interp1d(self.l_WL,El_LL,axis=0, kind='cubic')(self.ells_WL)
+                norm = np.sqrt(self.lmax_WL - self.lmin + 1)
+                T_Rerr =  norm * inter_LL
+            if 'GCph' in self.probe or 'WL_GCph_XC' in self.probe:
+                inter_GG = interp1d(self.l_GC,El_GG,axis=0, kind='cubic')(self.ells_GC)
+                norm = np.sqrt(self.lmax_GC - self.lmin + 1)
+                T_Rerr =  norm * inter_GG
+            if 'WL_GCph_XC' in self.probe:
+                inter_GL = interp1d(self.l_XC,El_GL,axis=0, kind='cubic')(self.ells_XC)
+                inter_LG = np.transpose(inter_GL,(0,2,1))
+                norm = np.sqrt(np.maximum(self.lmax_WL,self.lmax_GC) - self.lmin + 1)
+                if self.lmax_WL > self.lmax_GC:
+                    T_Rerr = norm * np.block([[inter_LL[:self.ell_jump,:,:],inter_LG],[inter_GL,inter_GG]])
+                    T_Rerr_high = norm * inter_LL[self.ell_jump:,:,:]
+                else:
+                    T_Rerr = norm * np.block([[inter_LL,inter_LG],[inter_GL,inter_GG[:self.ell_jump,:,:]]])
+                    T_Rerr_high = norm * inter_GG[self.ell_jump:,:,:]
 
         ######################
         # Compute likelihood
         ######################
         # Define cov theory and observ on the whole integer range of ell values
+        def compute_chisq(eps_l):
+            if 'WL' in self.probe or 'GCph' in self.probe:
+                shifted_Cov = Cov_theory + eps_l[:,None,None] * T_Rerr
+                dtilde_the = np.linalg.det(shifted_Cov)
+                d_obs = np.linalg.det(self.Cov_observ)
+                dtilde_mix = np.zeros_like(dtilde_the)
+                for i in range(self.nbin):
+                    newCov = np.copy(shifted_Cov)
+                    newCov[:, i] = self.Cov_observ[:, :, i]
+                    dtilde_mix += np.linalg.det(newCov)
 
-        chi2 = 0.
+                N =np.ones_like(ells) * self.nbin
+                return np.sum((2 * ells + 1) * self.fsky * ((dtilde_mix / dtilde_the) + np.log(dtilde_the / d_obs) - N) + np.power(eps_l, 2))
 
-        if 'WL_GCph_XC' in self.probe:
-            d_the = np.linalg.det(Cov_theory)
-            d_obs = np.linalg.det(self.Cov_observ)
-            d_mix = np.zeros_like(d_the)
-            for i in range(2*self.nbin):
-                newCov = Cov_theory.copy()
-                newCov[:, i] = self.Cov_observ[:, :, i]
-                d_mix += np.linalg.det(newCov)
+            elif 'WL_GCph_XC' in self.probe:
+                shifted_Cov = Cov_theory + eps_l[:self.ell_jump,None,None] * T_Rerr
+                dtilde_the = np.linalg.det(shifted_Cov)
+                d_obs = np.linalg.det(self.Cov_observ)
+                dtilde_mix = np.zeros_like(dtilde_the)
+                for i in range(2*self.nbin):
+                    newCov = np.copy(shifted_Cov)
+                    newCov[:, i] = self.Cov_observ[:, :, i]
+                    dtilde_mix += np.linalg.det(newCov)
 
-            d_the_high = np.linalg.det(Cov_theory_high)
-            d_obs_high = np.linalg.det(self.Cov_observ_high)
-            d_mix_high = np.zeros_like(d_the_high)
-            for i in range(self.nbin):
-                newCov = Cov_theory_high.copy()
-                newCov[:, i] = self.Cov_observ_high[:, :, i]
-                d_mix_high += np.linalg.det(newCov)
+                shifted_Cov_high = Cov_theory_high + eps_l[self.ell_jump:,None,None] * T_Rerr_high
+                dtilde_the_high = np.linalg.det(shifted_Cov_high)
+                d_obs_high = np.linalg.det(self.Cov_observ_high)
+                dtilde_mix_high = np.zeros_like(dtilde_the_high)
+                for i in range(self.nbin):
+                    newCov = np.copy(shifted_Cov_high)
+                    newCov[:, i] = self.Cov_observ_high[:, :, i]
+                    dtilde_mix_high += np.linalg.det(newCov)
 
-            N =np.ones_like(ells)*2*self.nbin
-            N[np.where(ells>self.lmax_XC)] = self.nbin
+                N =np.ones_like(ells) * self.nbin
+                N[:self.ell_jump] = self.nbin * 2
 
-            d_the = np.concatenate([d_the,d_the_high])
-            d_obs = np.concatenate([d_obs,d_obs_high])
-            d_mix = np.concatenate([d_mix,d_mix_high])
+                dtilde_the = np.concatenate([dtilde_the,dtilde_the_high])
+                d_obs = np.concatenate([d_obs,d_obs_high])
+                dtilde_mix = np.concatenate([dtilde_mix,dtilde_mix_high])
 
-            chi2 += np.sum((2*ells+1)*self.fsky*((d_mix/d_the)+np.log(d_the/d_obs)-N))
+                return np.sum((2 * ells + 1) * self.fsky * ((dtilde_mix / dtilde_the) + np.log(dtilde_the / d_obs) - N) + np.power(eps_l, 2))
 
-        elif 'WL' in self.probe:
-            d_the = np.linalg.det(Cov_theory)
-            d_obs = np.linalg.det(self.Cov_observ)
-            d_mix = np.zeros_like(d_the)
-            for i in range(self.nbin):
-                newCov = np.copy(Cov_theory)
-                newCov[:, i] = self.Cov_observ[:, :, i]
-                d_mix += np.linalg.det(newCov)
+        eps_l = np.zeros_like(ells)
+        if self.theoretical_error != False:
+            eps_l = minimize(compute_chisq, eps_l)
 
-            N =np.ones_like(self.ells_WL)*self.nbin
-
-            chi2 += np.sum((2*self.ells_WL+1)*self.fsky*((d_mix/d_the)+np.log(d_the/d_obs)-N))
-
-        elif 'GCph' in self.probe:
-            d_the = np.linalg.det(Cov_theory)
-            d_obs = np.linalg.det(self.Cov_observ)
-            d_mix = np.zeros_like(d_the)
-            for i in range(self.nbin):
-                newCov = np.copy(Cov_theory)
-                newCov[:, i] = self.Cov_observ[:, :, i]
-                d_mix += np.linalg.det(newCov)
-
-            N =np.ones_like(self.ells_GC)*self.nbin
-
-            chi2 += np.sum((2*self.ells_GC+1)*self.fsky*((d_mix/d_the)+np.log(d_the/d_obs)-N))
-
+        chi2 = compute_chisq(eps_l)
         print("euclid photometric: chi2 = ",chi2)
         return -chi2/2.
+
 
     def forge_norm(self):
         """forge normalization calculation
