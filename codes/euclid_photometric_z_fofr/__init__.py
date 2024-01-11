@@ -986,7 +986,7 @@ class euclid_photometric_z_fofr(Likelihood):
         # Compute likelihood
         ######################
         # Define cov theory and observ on the whole integer range of ell values
-        def compute_chisq(eps_l):
+        def compute_determinants(eps_l):
             if 'WL' in self.probe or 'GCph' in self.probe:
                 shifted_Cov = Cov_theory + eps_l[:,None,None] * T_Rerr
                 dtilde_the = np.linalg.det(shifted_Cov)
@@ -998,7 +998,6 @@ class euclid_photometric_z_fofr(Likelihood):
                     dtilde_mix += np.linalg.det(newCov)
 
                 N =np.ones_like(ells) * self.nbin
-                return np.sum((2 * ells + 1) * self.fsky * ((dtilde_mix / dtilde_the) + np.log(dtilde_the / d_obs) - N) + np.power(eps_l, 2))
 
             elif 'WL_GCph_XC' in self.probe:
                 shifted_Cov = Cov_theory + eps_l[:self.ell_jump,None,None] * T_Rerr
@@ -1026,11 +1025,24 @@ class euclid_photometric_z_fofr(Likelihood):
                 d_obs = np.concatenate([d_obs,d_obs_high])
                 dtilde_mix = np.concatenate([dtilde_mix,dtilde_mix_high])
 
-                return np.sum((2 * ells + 1) * self.fsky * ((dtilde_mix / dtilde_the) + np.log(dtilde_the / d_obs) - N) + np.power(eps_l, 2))
+            return d_obs, dtilde_the, dtilde_mix, N
 
+        def compute_chisq(eps_l):
+            d_obs, dtilde_the, dtilde_mix, N = compute_determinants(eps_l)
+            
+            return np.sum((2 * ells + 1) * self.fsky * ((dtilde_mix / dtilde_the) + np.log(dtilde_the / d_obs) - N) + np.power(eps_l, 2))
+
+        def jac(eps):
+            _, d_the, d_mix, _ = compute_determinants(np.zeros_like(ells))
+            step = 1e-3 * d_the/d_mix
+            stencil = [eps-step, eps, eps+step]
+            points = [compute_chisq(epi) for epi in stencil]
+            return (points[2]-points[0])/(stencil[2]-stencil[0])
+        
         eps_l = np.zeros_like(ells)
         if self.theoretical_error != False:
-            eps_l = minimize(compute_chisq, eps_l)
+            res = minimize(compute_chisq, eps_l, tol=1e-2, method='Newton-CG',jac=jac, hess='3-point')
+            eps_l = res.x
         
         if printtimes:
             t_lkl = time()
