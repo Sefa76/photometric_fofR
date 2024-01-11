@@ -639,8 +639,9 @@ class euclid_photometric_z_fofr(Likelihood):
                     return np.clip(fofR_boost(np.clip(k,0.01,fofR_kmax),np.minimum(z,fofR_zmax))*(np.maximum(z,fofR_zmax)/fofR_zmax)**gammaz_k(np.clip(k,0.01,fofR_kmax))*(np.maximum(k,fofR_kmax)/fofR_kmax)**gammak_z(np.minimum(z,fofR_zmax)),1,2)
 
             boost_m_nl_fofR = np.ones_like(k)
-            for index_l, index_z in index_pknn:
-                boost_m_nl_fofR[index_l,index_z] = Boost_extrapolation(k[index_l,index_z],self.z[index_z])
+            for index_z, z_value in enumerate(self.z):
+                pknn_mask = np.where((k[:,index_z]>kmin_in_inv_Mpc) & (k[:,index_z]<kmax_in_inv_Mpc))
+                boost_m_nl_fofR[pknn_mask,index_z] = Boost_extrapolation(k[pknn_mask,index_z],z_value)
             Pk *= boost_m_nl_fofR
 
         if printtimes:
