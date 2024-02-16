@@ -981,78 +981,174 @@ class euclid_photometric_z_fofr(Likelihood):
         if printtimes:
             t_spline = time()
             print("Cell Splined in:", t_spline-t_therr)
-        
+
         ######################
         # Compute likelihood
         ######################
-        # Define cov theory and observ on the whole integer range of ell values
-        def compute_determinants(eps_l):
-            if 'WL' in self.probe or 'GCph' in self.probe:
-                shifted_Cov = Cov_theory + eps_l[:,None,None] * T_Rerr
-                dtilde_the = np.linalg.det(shifted_Cov)
-                d_obs = np.linalg.det(self.Cov_observ)
-                dtilde_mix = np.zeros_like(dtilde_the)
-                for i in range(self.nbin):
-                    newCov = np.copy(shifted_Cov)
-                    newCov[:, i] = self.Cov_observ[:, :, i]
-                    dtilde_mix += np.linalg.det(newCov)
 
-                N =np.ones_like(ells) * self.nbin
+        if 'WL' in self.probe or 'GCph' in self.probe:
+            compute_chiq = lambda eps: self.compute_chiq(eps, ells, self.Cov_observ, Cov_theory, T_Rerr)
+            jac = lambda eps: self.jac(eps, ells, self.Cov_observ, Cov_theory, T_Rerr)
 
-            elif 'WL_GCph_XC' in self.probe:
-                shifted_Cov = Cov_theory + eps_l[:self.ell_jump,None,None] * T_Rerr
-                dtilde_the = np.linalg.det(shifted_Cov)
-                d_obs = np.linalg.det(self.Cov_observ)
-                dtilde_mix = np.zeros_like(dtilde_the)
-                for i in range(2 * self.nbin):
-                    newCov = np.copy(shifted_Cov)
-                    newCov[:, i] = self.Cov_observ[:, :, i]
-                    dtilde_mix += np.linalg.det(newCov)
+        elif 'WL_GCph_XC' in self.probe:
+            compute_chiq = lambda eps: self.compute_chiq(eps, ells, self.Cov_observ, Cov_theory, T_Rerr, self.Cov_observ_high, Cov_theory_high, T_Rerr_high)
+            jac = lambda eps: self.jac(eps, ells, self.Cov_observ, Cov_theory, T_Rerr, self.Cov_observ_high, Cov_theory_high, T_Rerr_high)
 
-                shifted_Cov_high = Cov_theory_high + eps_l[self.ell_jump:,None,None] * T_Rerr_high
-                dtilde_the_high = np.linalg.det(shifted_Cov_high)
-                d_obs_high = np.linalg.det(self.Cov_observ_high)
-                dtilde_mix_high = np.zeros_like(dtilde_the_high)
-                for i in range(self.nbin):
-                    newCov = np.copy(shifted_Cov_high)
-                    newCov[:, i] = self.Cov_observ_high[:, :, i]
-                    dtilde_mix_high += np.linalg.det(newCov)
-
-                N =np.ones_like(ells) * self.nbin
-                N[:self.ell_jump] = self.nbin * 2
-
-                dtilde_the = np.concatenate([dtilde_the,dtilde_the_high])
-                d_obs = np.concatenate([d_obs,d_obs_high])
-                dtilde_mix = np.concatenate([dtilde_mix,dtilde_mix_high])
-
-            return d_obs, dtilde_the, dtilde_mix, N
-
-        def compute_chisq(eps_l):
-            d_obs, dtilde_the, dtilde_mix, N = compute_determinants(eps_l)
-            
-            return np.sum((2 * ells + 1) * self.fsky * ((dtilde_mix / dtilde_the) + np.log(dtilde_the / d_obs) - N) + np.power(eps_l, 2))
-
-        def jac(eps):
-            _, d_the, d_mix, _ = compute_determinants(np.zeros_like(ells))
-            step = 1e-3 * d_the/d_mix
-            stencil = [eps-step, eps, eps+step]
-            points = [compute_chisq(epi) for epi in stencil]
-            return (points[2]-points[0])/(stencil[2]-stencil[0])
-        
         eps_l = np.zeros_like(ells)
         if self.theoretical_error != False:
-            res = minimize(compute_chisq, eps_l, tol=1e-2, method='Newton-CG',jac=jac, hess='3-point')
-            eps_l = res.x
-        
+            do_binned = True
+            if do_binned:
+                ells_binned = np.unique(np.geomspace(self.lmin,np.maximum(self.lmax_WL, self.lmax_GC), self.lbin, dtype = np.uint64))
+                index_low = ells_binned[np.where(ells_binned < self.ell_jump)] - self.lmin
+                index_high = ells_binned[np.where(ells_binned >= self.ell_jump)] - self.ell_jump - self.lmin
+                eps_binned = np.zeros_like(ells_binned)
+                if 'WL' in self.probe or 'GCph' in self.probe:
+                    Cov_obs_binned = self.Cov_observ[index_low]
+                    Cov_the_binned = Cov_theory[index_low]
+                    T_Rerr_binned = T_Rerr[index_low]
+
+                    chisq_binned = lambda eps : self.compute_chiq(eps, ells_binned, Cov_obs_binned, Cov_the_binned, T_Rerr_binned)
+                    jac_binned = lambda eps : self.jac(eps, ells_binned, Cov_obs_binned, Cov_the_binned, T_Rerr_binned)
+                elif 'WL_GCph_XC' in self.probe:
+                    Cov_obs_binned = self.Cov_observ[index_low]
+                    Cov_the_binned = Cov_theory[index_low]
+                    T_Rerr_binned = T_Rerr[index_low]
+                    Cov_obs_binned_high = self.Cov_observ_high[index_high]
+                    Cov_the_binned_high = Cov_theory_high[index_high]
+                    T_Rerr_binned_high = T_Rerr_high[index_high]
+
+                    chisq_binned = lambda eps : self.compute_chiq(eps, ells_binned, Cov_obs_binned, Cov_the_binned, T_Rerr_binned, Cov_obs_binned_high, Cov_the_binned_high, T_Rerr_binned_high)
+                    jac_binned = lambda eps : self.jac(eps, ells_binned, Cov_obs_binned, Cov_the_binned, T_Rerr_binned, Cov_obs_binned_high, Cov_the_binned_high, T_Rerr_binned_high)
+                
+                res = minimize(chisq_binned, eps_binned, tol=1e-2, method='Newton-CG',jac=jac_binned, hess='3-point')
+                eps_binned = res.x
+                eps_l = interp1d(ells_binned, eps_binned, kind='cubic')(ells)
+            else:
+                res = minimize(compute_chiq, eps_l, tol=1e-2, method='Newton-CG',jac=jac, hess='3-point')
+                eps_l = res.x
+
         if printtimes:
             t_lkl = time()
             print("Likelihood calculated in:" ,t_lkl-t_spline)
             print("Total time taken:", t_lkl-t_start)
 
-        chi2 = compute_chisq(eps_l)
         print("euclid photometric: chi2 = ",chi2)
         return -chi2/2.
 
+    # Comopute the log likelihood for a given set of multipoles
+    def compute_chiq(self, eps_l, ells, Cov_observ, Cov_theory, T_Rerr, Cov_observ_high=None, Cov_theory_high=None, T_Rerr_high=None):
+
+        # find the  #redshift bins X #probes from the covariance matrix
+        nbin = Cov_observ.shape[1]
+        # find the multipole with the jump
+        ell_jump = Cov_observ.shape[0]
+
+        # calculate the necesarry determinants
+        shifted_Cov = Cov_theory + eps_l[:ell_jump, None, None] * T_Rerr
+        dtilde_the = np.linalg.det(shifted_Cov)
+
+        d_obs = np.linalg.det(Cov_observ)
+
+        dtilde_mix = np.zeros_like(dtilde_the)
+        for i in range(nbin):
+            newCov = np.copy(shifted_Cov)
+            newCov[:, i] = Cov_observ[:, :, i]
+            dtilde_mix += np.linalg.det(newCov)
+
+        N = np.ones_like(ells) * nbin
+
+        # if the probe is 3x2pt calculate the part with no cross correlation
+        if "WL_GCph_XC" in self.probe:
+
+            nbin = Cov_observ_high.shape[1]
+
+            shifted_Cov_high = Cov_theory_high + eps_l[ell_jump:, None, None] * T_Rerr_high
+            dtilde_the_high = np.linalg.det(shifted_Cov_high)
+
+            d_obs_high = np.linalg.det(Cov_observ_high)
+
+            dtilde_mix_high = np.zeros_like(dtilde_the_high)
+            for i in range(nbin):
+                newCov = np.copy(shifted_Cov_high)
+                newCov[:, i] = Cov_observ_high[:, :, i]
+                dtilde_mix_high += np.linalg.det(newCov)
+
+            N[ell_jump:] = nbin
+            dtilde_the = np.concatenate([dtilde_the, dtilde_the_high])
+            d_obs = np.concatenate([d_obs, d_obs_high])
+            dtilde_mix = np.concatenate([dtilde_mix, dtilde_mix_high])
+
+
+        return np.sum((2 * ells + 1) * self.fsky * ((dtilde_mix / dtilde_the) + np.log(dtilde_the / d_obs) - N) + np.power(eps_l, 2))
+
+    # compute the jacobian with respect to the epsilons for the minimization
+    def jac(self, eps_l, ells, Cov_observ, Cov_theory, T_Rerr, Cov_observ_high=None, Cov_theory_high=None, T_Rerr_high=None):
+
+        # find the  #redshift bins X #probes from the covariance matrix
+        nbin = Cov_observ.shape[1]
+        # find the multipole with the jump
+        ell_jump = Cov_observ.shape[0]
+
+        shifted_Cov = Cov_theory + eps_l[:ell_jump, None, None] * T_Rerr
+        dtilde_the = np.linalg.det(shifted_Cov)
+        inv_shifted_Cov = np.linalg.inv(shifted_Cov)
+        dprime_the = dtilde_the * np.trace(
+            np.matmul(inv_shifted_Cov, T_Rerr), axis1=1, axis2=2
+        )
+
+        d_obs = np.linalg.det(Cov_observ)
+
+        dtilde_mix = np.zeros_like(dtilde_the)
+        dprime_mix = np.zeros_like(dtilde_the)
+        for i in range(nbin):
+            newCov = np.copy(shifted_Cov)
+            newCov[:, i] = Cov_observ[:, :, i]
+            dnewCov = np.linalg.det(newCov)
+            dtilde_mix += dnewCov
+
+            newCovprime = np.copy(T_Rerr)
+            newCovprime[:, i] = 0
+            inv_newCov = np.linalg.inv(newCov)
+            dprime_mix += dnewCov * np.trace(
+                np.matmul(inv_newCov, newCovprime), axis1=1, axis2=2
+            )
+
+        # if the probe is 3x2pt calculate the part with no cross correlation
+        if "WL_GCph_XC" in self.probe:
+
+            nbin = Cov_observ_high.shape[1]
+
+            shifted_Cov_high = Cov_theory_high + eps_l[ell_jump:, None, None] * T_Rerr_high
+            dtilde_the_high = np.linalg.det(shifted_Cov_high)
+            inv_shifted_Cov_high = np.linalg.inv(shifted_Cov_high)
+            dprime_the_high = dtilde_the_high * np.trace(
+                np.matmul(inv_shifted_Cov_high, T_Rerr_high), axis1=1, axis2=2
+            )
+
+            d_obs_high = np.linalg.det(Cov_observ_high)
+
+            dtilde_mix_high = np.zeros_like(dtilde_the_high)
+            dprime_mix_high = np.zeros_like(dtilde_the_high)
+            for i in range(nbin):
+                newCov = np.copy(shifted_Cov_high)
+                newCov[:, i] = Cov_observ_high[:, :, i]
+                dnewCov_high = np.linalg.det(newCov)
+                dtilde_mix_high += dnewCov_high
+
+                newCovprime_high = np.copy(T_Rerr_high)
+                newCovprime_high[:, i] = 0
+                inv_newCov = np.linalg.inv(newCov)
+                dprime_mix_high += dnewCov_high * np.trace(
+                    np.matmul(inv_newCov, newCovprime_high), axis1=1, axis2=2
+                )
+
+            dtilde_the = np.concatenate([dtilde_the, dtilde_the_high])
+            dprime_the = np.concatenate([dprime_the, dprime_the_high])
+            d_obs = np.concatenate([d_obs, d_obs_high])
+            dtilde_mix = np.concatenate([dtilde_mix, dtilde_mix_high])
+            dprime_mix = np.concatenate([dprime_mix, dprime_mix_high])
+
+        return (2 * ells + 1) * self.fsky * ((dprime_mix + dprime_the) / dtilde_the - (dtilde_mix * dprime_the) / np.power(dtilde_the, 2)) + 2 * eps_l
 
     def forge_norm(self):
         """forge normalization calculation
