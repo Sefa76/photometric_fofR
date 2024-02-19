@@ -887,6 +887,28 @@ class euclid_photometric_z_fofr(Likelihood):
                 # In the simple case we set the relative theoretical error to be 2% of the boost
                 alpha = boost_m_nl_fofR*self.fR_error
 
+            elif self.use_fofR != False and self.theoretical_error == 'react_cast':
+                # obtained fits from ratio of ReACT with Forge at HS6.
+                def A_plateau(z):
+                    Delta = 0.0356204
+                    Base = 0.029017
+                    Temperature = 0.06154762
+                    potential = 0.56233084
+                    return Delta / (np.exp((z-potential) / Temperature)+1)+Base
+                
+                def k_plateau(z):
+                    kinf = 0.20253502 
+                    pos = 1.55716999 
+                    sigma = 0.55169064
+                    kinf*np.exp(np.tanh((z-pos)/sigma))
+
+                def smoothish_step(x):
+                    return (np.power(x,2)+x)/(np.power(x,2)+x+1)
+                
+                for index_z, z_value in enumerate(self.z):
+                    pknn_mask = np.where((k[:,index_z]>kmin_in_inv_Mpc) & (k[:,index_z]<kmax_in_inv_Mpc))
+                    alpha[pknn_mask,index_z] = A_plateau(z_value) * smoothish_step(k[pknn_mask,index_z]/k_plateau(z_value))                
+
             else:
                 raise Exception("Theorerical error model not recognized. Please choose from 'simple_fR' or ...")
 
