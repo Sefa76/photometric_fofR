@@ -900,7 +900,7 @@ class euclid_photometric_z_fofr(Likelihood):
                     kinf = 0.20253502 
                     pos = 1.55716999 
                     sigma = 0.55169064
-                    kinf*np.exp(np.tanh((z-pos)/sigma))
+                    return kinf*np.exp(np.tanh((z-pos)/sigma))
 
                 def smoothish_step(x):
                     return (np.power(x,2)+x)/(np.power(x,2)+x+1)
@@ -1048,6 +1048,8 @@ class euclid_photometric_z_fofr(Likelihood):
             else:
                 res = minimize(compute_chiq, eps_l, tol=1e-2, method='Newton-CG',jac=jac, hess='3-point')
                 eps_l = res.x
+
+        chi2 = compute_chiq(eps_l)
 
         if printtimes:
             t_lkl = time()
