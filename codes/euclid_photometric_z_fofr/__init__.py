@@ -180,7 +180,7 @@ class euclid_photometric_z_fofr(Likelihood):
                     if not np.isclose(l_WL,self.l_WL).all():
                         raise Exception("Maximum multipole of WL has changed between fiducial and now.\n Fiducial lmax = {}, new lmax = {}. \n Please remove old fiducial and generate a new one".format(max(l_WL),max(self.l_WL)))
                     Cl_LL = fid_file['Cl_LL']
-                    inter_LL = interp1d(l_WL,Cl_LL,axis=0, kind='cubic')(self.ells_WL)
+                    inter_LL = interp1d(l_WL,Cl_LL,axis=0, kind='cubic',fill_value="extrapolate")(self.ells_WL)
                     self.Cov_observ = inter_LL
 
                 if 'GCph' in self.probe or 'WL_GCph_XC' in self.probe:
@@ -188,13 +188,13 @@ class euclid_photometric_z_fofr(Likelihood):
                     if not np.isclose(l_GC,self.l_GC).all():
                         raise Exception("Maximum multipole of GC has changed between fiducial and now.\n Fiducial lmax = {}, new lmax = {}. \n Please remove old fiducial and generate a new one".format(max(l_GC),max(self.l_GC)))
                     Cl_GG = fid_file['Cl_GG']
-                    inter_GG = interp1d(l_GC,Cl_GG,axis=0, kind='cubic')(self.ells_GC)
+                    inter_GG = interp1d(l_GC,Cl_GG,axis=0, kind='cubic',fill_value="extrapolate")(self.ells_GC)
                     self.Cov_observ = inter_GG
 
                 if 'WL_GCph_XC' in self.probe:
                     l_XC = fid_file['ells_GL']
                     Cl_GL = fid_file['Cl_GL']
-                    inter_GL = interp1d(l_XC,Cl_GL,axis=0, kind='cubic')(self.ells_XC)
+                    inter_GL = interp1d(l_XC,Cl_GL,axis=0, kind='cubic',fill_value="extrapolate")(self.ells_XC)
                     inter_LG = np.transpose(inter_GL,(0,2,1))
                     if self.lmax_WL > self.lmax_GC:
                         self.Cov_observ = np.block([[inter_LL[:self.ell_jump,:,:],inter_LG],[inter_GL,inter_GG]])
@@ -958,15 +958,15 @@ class euclid_photometric_z_fofr(Likelihood):
         #############
         # Find C(l) for every integer l
         if 'WL' in self.probe or 'WL_GCph_XC' in self.probe:
-            inter_LL = interp1d(self.l_WL,Cl_LL,axis=0, kind='cubic')(self.ells_WL)
+            inter_LL = interp1d(self.l_WL,Cl_LL,axis=0, kind='cubic',fill_value="extrapolate")(self.ells_WL)
             Cov_theory = inter_LL
             ells = self.ells_WL
         if 'GCph' in self.probe or 'WL_GCph_XC' in self.probe:
-            inter_GG = interp1d(self.l_GC,Cl_GG,axis=0, kind='cubic')(self.ells_GC)
+            inter_GG = interp1d(self.l_GC,Cl_GG,axis=0, kind='cubic',fill_value="extrapolate")(self.ells_GC)
             Cov_theory = inter_GG
             ells = self.ells_GC
         if 'WL_GCph_XC' in self.probe:
-            inter_GL = interp1d(self.l_XC,Cl_GL,axis=0, kind='cubic')(self.ells_XC)
+            inter_GL = interp1d(self.l_XC,Cl_GL,axis=0, kind='cubic',fill_value="extrapolate")(self.ells_XC)
             inter_LG = np.transpose(inter_GL,(0,2,1))
             if self.lmax_WL > self.lmax_GC:
                 Cov_theory = np.block([[inter_LL[:self.ell_jump,:,:],inter_LG],[inter_GL,inter_GG]])
@@ -978,19 +978,19 @@ class euclid_photometric_z_fofr(Likelihood):
                 ells = self.ells_GC
 
         T_Rerr = np.zeros_like(Cov_theory)
-        T_Rerr_high = np.zeros_like(Cov_theory_high)
         if self.theoretical_error != False:
             # Find the theoretical error matrix for every interger l
             if 'WL' in self.probe or 'WL_GCph_XC' in self.probe:
-                inter_LL = interp1d(self.l_WL,El_LL,axis=0, kind='cubic')(self.ells_WL)
+                inter_LL = interp1d(self.l_WL,El_LL,axis=0, kind='cubic',fill_value="extrapolate")(self.ells_WL)
                 norm = np.sqrt(self.lmax_WL - self.lmin + 1)
                 T_Rerr =  norm * inter_LL
             if 'GCph' in self.probe or 'WL_GCph_XC' in self.probe:
-                inter_GG = interp1d(self.l_GC,El_GG,axis=0, kind='cubic')(self.ells_GC)
+                inter_GG = interp1d(self.l_GC,El_GG,axis=0, kind='cubic',fill_value="extrapolate")(self.ells_GC)
                 norm = np.sqrt(self.lmax_GC - self.lmin + 1)
                 T_Rerr =  norm * inter_GG
             if 'WL_GCph_XC' in self.probe:
-                inter_GL = interp1d(self.l_XC,El_GL,axis=0, kind='cubic')(self.ells_XC)
+                T_Rerr_high = np.zeros_like(Cov_theory_high)
+                inter_GL = interp1d(self.l_XC,El_GL,axis=0, kind='cubic',fill_value="extrapolate")(self.ells_XC)
                 inter_LG = np.transpose(inter_GL,(0,2,1))
                 norm = np.sqrt(np.maximum(self.lmax_WL,self.lmax_GC) - self.lmin + 1)
                 if self.lmax_WL > self.lmax_GC:
@@ -1020,9 +1020,18 @@ class euclid_photometric_z_fofr(Likelihood):
         if self.theoretical_error != False:
             do_binned = True
             if do_binned:
-                ells_binned = np.unique(np.geomspace(self.lmin,np.maximum(self.lmax_WL, self.lmax_GC), self.lbin, dtype = np.uint64))
-                index_low = ells_binned[np.where(ells_binned < self.ell_jump)] - self.lmin
-                index_high = ells_binned[np.where(ells_binned >= self.ell_jump)] - self.ell_jump - self.lmin
+                if 'WL' in self.probe or 'GCph' in self.probe:
+                    if 'WL' in self.probe:
+                        ells_binned = np.unique(np.geomspace(self.lmin,self.lmax_WL, self.lbin, dtype = np.uint64))
+                    if 'GCph' in self.probe:
+                        ells_binned = np.unique(np.geomspace(self.lmin,self.lmax_GC, self.lbin, dtype = np.uint64))
+                    index_low = ells_binned - self.lmin
+
+                elif 'WL_GCph_XC' in self.probe:
+                        ells_binned = np.unique(np.geomspace(self.lmin,np.maximum(self.lmax_WL,self.lmax_GC), self.lbin, dtype = np.uint64))
+                        index_low = ells_binned[np.where(ells_binned < self.ell_jump)] - self.lmin
+                        index_high = ells_binned[np.where(ells_binned >= self.ell_jump)] - self.ell_jump - self.lmin
+
                 eps_binned = np.zeros_like(ells_binned)
                 if 'WL' in self.probe or 'GCph' in self.probe:
                     Cov_obs_binned = self.Cov_observ[index_low]
@@ -1031,6 +1040,7 @@ class euclid_photometric_z_fofr(Likelihood):
 
                     chisq_binned = lambda eps : self.compute_chiq(eps, ells_binned, Cov_obs_binned, Cov_the_binned, T_Rerr_binned)
                     jac_binned = lambda eps : self.jac(eps, ells_binned, Cov_obs_binned, Cov_the_binned, T_Rerr_binned)
+
                 elif 'WL_GCph_XC' in self.probe:
                     Cov_obs_binned = self.Cov_observ[index_low]
                     Cov_the_binned = Cov_theory[index_low]
@@ -1044,7 +1054,7 @@ class euclid_photometric_z_fofr(Likelihood):
                 
                 res = minimize(chisq_binned, eps_binned, tol=1e-2, method='Newton-CG',jac=jac_binned, hess='3-point')
                 eps_binned = res.x
-                eps_l = interp1d(ells_binned, eps_binned, kind='cubic')(ells)
+                eps_l = interp1d(ells_binned, eps_binned, kind='cubic',fill_value="extrapolate")(ells)
             else:
                 res = minimize(compute_chiq, eps_l, tol=1e-2, method='Newton-CG',jac=jac, hess='3-point')
                 eps_l = res.x
