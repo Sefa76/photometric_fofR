@@ -879,6 +879,7 @@ class euclid_photometric_z_fofr(Likelihood):
         The recepie has been adjusted to also work with the full 3x2pt probe.
         Any other source of theorerical error must be added seperately in the computation of the relative theoretical error.
         """
+
         if self.theoretical_error != False:
 
             #calculate the relative theoretical error
@@ -978,6 +979,9 @@ class euclid_photometric_z_fofr(Likelihood):
                 ells = self.ells_GC
 
         T_Rerr = np.zeros_like(Cov_theory)
+        if 'WL_GCph_XC' in self.probe:
+            T_Rerr_high = np.zeros_like(Cov_theory_high)
+
         if self.theoretical_error != False:
             # Find the theoretical error matrix for every interger l
             if 'WL' in self.probe or 'WL_GCph_XC' in self.probe:
@@ -989,7 +993,6 @@ class euclid_photometric_z_fofr(Likelihood):
                 norm = np.sqrt(self.lmax_GC - self.lmin + 1)
                 T_Rerr =  norm * inter_GG
             if 'WL_GCph_XC' in self.probe:
-                T_Rerr_high = np.zeros_like(Cov_theory_high)
                 inter_GL = interp1d(self.l_XC,El_GL,axis=0, kind='cubic',fill_value="extrapolate")(self.ells_XC)
                 inter_LG = np.transpose(inter_GL,(0,2,1))
                 norm = np.sqrt(np.maximum(self.lmax_WL,self.lmax_GC) - self.lmin + 1)
@@ -1052,11 +1055,11 @@ class euclid_photometric_z_fofr(Likelihood):
                     chisq_binned = lambda eps : self.compute_chiq(eps, ells_binned, Cov_obs_binned, Cov_the_binned, T_Rerr_binned, Cov_obs_binned_high, Cov_the_binned_high, T_Rerr_binned_high)
                     jac_binned = lambda eps : self.jac(eps, ells_binned, Cov_obs_binned, Cov_the_binned, T_Rerr_binned, Cov_obs_binned_high, Cov_the_binned_high, T_Rerr_binned_high)
                 
-                res = minimize(chisq_binned, eps_binned, tol=1e-2, method='Newton-CG',jac=jac_binned, hess='3-point')
+                res = minimize(chisq_binned, eps_binned, tol=1e-3, method='Newton-CG',jac=jac_binned, hess='3-point')
                 eps_binned = res.x
                 eps_l = interp1d(ells_binned, eps_binned, kind='cubic',fill_value="extrapolate")(ells)
             else:
-                res = minimize(compute_chiq, eps_l, tol=1e-2, method='Newton-CG',jac=jac, hess='3-point')
+                res = minimize(compute_chiq, eps_l, tol=1e-3, method='Newton-CG',jac=jac, hess='3-point')
                 eps_l = res.x
 
         chi2 = compute_chiq(eps_l)
