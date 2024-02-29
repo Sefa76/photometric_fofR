@@ -12,11 +12,11 @@ To set up the path to class you need to do:
 
 then edit default.conf and set the path "root" to the directory that contains `class_public/` and change `path['cosmo'] accordingly.
 
-The f(R) likelihood, plus needed data and snippets are not publicly available yet, so copy them from
+Otherwise copy the default conf provided in this repo:
 
-    codes/MP_likelihood/
+    cp photometric_fofR/MP_default.conf default.conf
 
- by returning to the main directory and doing:
+The f(R) likelihood, plus needed data and snippets are not publicly available yet, so copy them by returning to the main directory and doing:
 
     cd ..
     cp -v photometric_fofR/codes/MGfit_Winther.py montepython_public/montepython/
