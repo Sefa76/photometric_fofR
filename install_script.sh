@@ -48,12 +48,12 @@ fi
 cd ..
 echo "****Installing CLASS"
 
-pip install classy
-#git clone git@github.com:lesgourg/class_public.git
-#cd class_public
-#make clean
-#make -j
-#cd ..
+#pip install classy
+git clone git@github.com:lesgourg/class_public.git
+cd class_public
+make clean
+make -j
+cd ..
 echo "Installation successful ****"
 
 echo "*** Installing Montepython****"
@@ -62,6 +62,7 @@ cp -v photometric_fofR/codes/MP_default.conf montepython_public/default.conf
 cp -v photometric_fofR/codes/MGfit_Winther.py montepython_public/montepython/
 cp -v photometric_fofR/codes/scaledmeanlum_E2Sa.dat montepython_public/data/
 cp -vr photometric_fofR/codes/euclid_photometric_z_fofr montepython_public/montepython/likelihoods/
+cp -vr photometric_fofR/codes/gaussianprior montepython_public/montepython/likelihoods/
 
 echo "**** Installing cosmopower and ReACT"
 
