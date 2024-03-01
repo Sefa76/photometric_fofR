@@ -12,9 +12,9 @@ then
     return 0
 fi
 
-echo "This will create the conda environment named photometric_fofR. Otherwise it will only activate the environment."
+echo "This will create and activate the conda environment named photometric_fofR. Otherwise it will only activate the environment."
 echo "** Please run this script as 'source install_script.sh' to allow for correct environment installation from within the terminal. **"
-read -p ">> Create or activate conda environment? Type: (Y/y/Yes/yes) for creation; Type: (activate/act) if you only want to activate an existing environment. Enter your response: " response
+read -p ">> Create or activate conda environment? Type: (Y/y/Yes/yes) for creation; Type: (activate/act) if you only want to activate an existing environment. If you type anything else, the installation script will continue in your current environment. Enter your response: " response
 if [[ $response =~ ^(Y|y|Yes|yes)$ ]]
 then
     conda env create -f environment-pip.yml  --force
@@ -32,6 +32,8 @@ then
 else
     # The user did not confirm, abort the operation
     echo "Creation of conda environment aborted. Install the following packages within your preferred python environment."
+    echo "Attempting pip installation"
+    pip install -U -r requirements.txt
 fi
 
 
