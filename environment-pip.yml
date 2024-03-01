@@ -1,4 +1,4 @@
-name: montepythonjc6
+name: photometric_fofR
 channels:
   - conda-forge
   - defaults

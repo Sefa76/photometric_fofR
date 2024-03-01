@@ -1,32 +1,59 @@
 #!/bin/bash
 
 echo "Current directory has to be the photometric_fofR directory"
-pwd
+curr=$(pwd)
+echo "Current directory: $curr "
+read -p "Are you currently inside the correct directory? (Y/y/Yes/yes) " response
+# Check if the response is anything other than Y, y, Yes, yes
+if [[ ! $response =~ ^(Y|y|Yes|yes)$ ]]
+then
+    # The user did not confirm, abort the operation
+    echo "Installation script exited. Please install from correct directory."
+    return 0
+fi
 
-echo "This will create and update the conda environment"
+echo "This will create the conda environment named photometric_fofR. Otherwise it will only activate the environment."
+echo "** Please run this script as 'source install_script.sh' to allow for correct environment installation from within the terminal. **"
+read -p ">> Create or activate conda environment? Type: (Y/y/Yes/yes) for creation; Type: (activate/act) if you only want to activate an existing environment. Enter your response: " response
+if [[ $response =~ ^(Y|y|Yes|yes)$ ]]
+then
+    conda env create -f environment-pip.yml  --force
+    sleep 10
 
-read -p "Are you sure you want to proceed? (Y/y/Yes/yes) " response
+    conda init bash
 
+    conda activate photometric_fofR
+fi
+if [[ $response =~ ^(activate|act)$ ]]
+then
+    conda init bash
+    conda activate photometric_fofR
+    sleep 10
+else
+    # The user did not confirm, abort the operation
+    echo "Creation of conda environment aborted. Install the following packages within your preferred python environment."
+fi
+
+
+read -p "Are you sure you want to proceed with the installation of packages and codes? (Y/y/Yes/yes) " response
 # Check if the response is anything other than Y, y, Yes, yes
 if [[ ! $response =~ ^(Y|y|Yes|yes)$ ]]
 then
     # The user did not confirm, abort the operation
     echo "Operation aborted."
-    exit 1
+    return 0
 fi
-
-echo "Create conda environment"
-conda create -f environment-pip.yml -q -y
 
 
 cd ..
 echo "****Installing CLASS"
 
-git clone git@github.com:lesgourg/class_public.git
-cd class_public
-make clean
-make -j
-cd ..
+pip install classy
+#git clone git@github.com:lesgourg/class_public.git
+#cd class_public
+#make clean
+#make -j
+#cd ..
 echo "Installation successful ****"
 
 echo "*** Installing Montepython****"
@@ -59,4 +86,3 @@ pip install BCemu
 
 
 echo ">>>> Installations successful<<<<<"
-exit 0
