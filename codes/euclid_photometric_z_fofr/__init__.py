@@ -303,7 +303,7 @@ class euclid_photometric_z_fofr(Likelihood):
         Boost = np.array([pofk_enhancement_linear(0,fR0,ki/h) for ki in k])
 
         Integr= np.power(k*W,2)*Pk*Boost/(2*np.pi**2)
-        sigma8= np.sqrt(simpson( Integr, k)) * kazuya_correktion(lgfR0)
+        sigma8= np.sqrt(simpson( Integr, x=k)) * kazuya_correktion(lgfR0)
 
         return sigma8
 
@@ -661,19 +661,19 @@ class euclid_photometric_z_fofr(Likelihood):
             nu_log10Mc = 0
             nu_thej = 0
             nu_deta = 0
-
+            ##params are set to the fiducial of BCemu
             bcemu_dict ={
             'log10Mc' : log10Mc,
             'nu_Mc'   : nu_log10Mc,
-            'mu'      : 1.0,
+            'mu'      : 0.93, 
             'nu_mu'   : 0.0,
             'thej'    : thej,
             'nu_thej' : nu_thej,
-            'gamma'   : 2.5,
+            'gamma'   : 2.25,
             'nu_gamma': 0.0,
-            'delta'   : 7.0,
+            'delta'   : 6.40,
             'nu_delta': 0.0,
-            'eta'     : 0.2,
+            'eta'     : 0.15,
             'nu_eta'  : 0.0,
             'deta'    : deta,
             'nu_deta' : nu_deta
