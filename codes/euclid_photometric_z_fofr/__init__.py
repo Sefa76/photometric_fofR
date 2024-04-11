@@ -9,7 +9,7 @@
 
 from montepython.likelihood_class import Likelihood
 
-from scipy.integrate import trapz, simpson
+from scipy.integrate import trapezoid, simpson
 from scipy.interpolate import interp1d, RectBivariateSpline
 from scipy.optimize import curve_fit, minimize
 
@@ -117,10 +117,8 @@ class euclid_photometric_z_fofr(Likelihood):
         if self.debug_save : np.savetxt('./unnorm_nofz.txt',self.eta_z) ## agrees
         # integrate eta(z) over z (in view of normalizing it to one)
         self.eta_norm = np.zeros(self.nbin, 'float64')
-        #norm = np.array([trapz([self.photo_z_distribution(z1, i+1) for z1 in zint],dx=dz) for i in range(self.nbin)])
         for Bin in range(self.nbin):
-            #self.eta_z[:,Bin] /= trapz(self.eta_z[:,Bin],dx=self.zmax/self.nzmax)
-            self.eta_z[:,Bin] /= trapz(self.eta_z[:,Bin],self.z[:])
+            self.eta_z[:,Bin] /= trapezoid(self.eta_z[:,Bin],self.z[:])
 
         if self.debug_save : np.savetxt('./n.txt',self.eta_z)
         # the normalised galaxy distribution per bin (dimensionless)
@@ -292,7 +290,7 @@ class euclid_photometric_z_fofr(Likelihood):
         """
 
         x = k*8/h
-        #Get Sigma windowfunktion
+        #Get Sigma window function
         W = 3 /np.power(x,3)*(np.sin(x)-x*np.cos(x))
         for ix, xi in enumerate(x):
             if xi<0.01:
@@ -387,8 +385,8 @@ class euclid_photometric_z_fofr(Likelihood):
         index_pknn = np.array(np.where((k> kmin_in_inv_Mpc) & (k<kmax_in_inv_Mpc))).transpose()
 
         for index_l, index_z in index_pknn:
-            pk_m_nl[index_l, index_z] = Pk_nl(self.z[index_z],k[index_l,index_z])
-            pk_m_l [index_l, index_z] = Pk_l (self.z[index_z],k[index_l,index_z])
+            pk_m_nl[index_l, index_z] = Pk_nl(self.z[index_z], k[index_l,index_z])[0]
+            pk_m_l[index_l, index_z] = Pk_l(self.z[index_z], k[index_l,index_z])[0]
 
         Pk = pk_m_nl
 
@@ -617,7 +615,7 @@ class euclid_photometric_z_fofr(Likelihood):
             k_power = []
             for iz, zi in enumerate(z_long):
                 for ik, ki in enumerate(k_cut):
-                    logBoostk[ik,iz] = np.log(fofR_boost(ki,zi))
+                    logBoostk[ik, iz] = np.log(fofR_boost(ki, zi))[0]
                 #fix boost at highest k to emulator value
                 popt, _= curve_fit(lambda x,gamma : logBoostk[-1,iz]+gamma*(x-logk_cut[-1]),logk_cut,logBoostk[:,iz])
                 k_power.append(popt[0])
@@ -628,7 +626,7 @@ class euclid_photometric_z_fofr(Likelihood):
             z_power = []
             for ik, ki in enumerate(k_long):
                 for iz, zi in enumerate(z_cut):
-                    logBoostz[ik,iz] = np.log(fofR_boost(ki,zi))
+                    logBoostz[ik,iz] = np.log(fofR_boost(ki,zi))[0]
                 #fix boost at highest z to emulator value
                 popt, _= curve_fit(lambda x,gamma : logBoostz[ik,-1]+gamma*(x-logz_cut[-1]),logz_cut,logBoostz[ik,:])
                 z_power.append(popt[0])
@@ -741,8 +739,8 @@ class euclid_photometric_z_fofr(Likelihood):
         if self.use_fofR and self.use_MGGrowth:
             D_z_boost = np.ones((self.lbin,self.nzmax), 'float64')
             for index_l, index_z in index_pknn:
-                D_z_boost[index_l,index_z] = np.sqrt(pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h()) /\
-                                                     pofk_enhancement_linear(              0,f_R0,k[index_l,index_z]/cosmo.h()))
+                D_z_boost[index_l, index_z] = np.sqrt(pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h()) /\
+                                                      pofk_enhancement_linear(              0,f_R0,k[index_l,index_z]/cosmo.h()))
             D_z  *=  D_z_boost
 
         if printtimes:
@@ -803,15 +801,15 @@ class euclid_photometric_z_fofr(Likelihood):
         # the indices are ell, z, bin_i, bin_j in the int and ell, bin_i, bin_j in the Ceeell
         if 'WL' in self.probe or 'WL_GCph_XC' in self.probe:
             Cl_LL_int = W_L[:,:,:,None] * W_L[:,:,None,:] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None]
-            Cl_LL     = trapz(Cl_LL_int,self.z,axis=1)[:nell_WL,:,:]
+            Cl_LL     = trapezoid(Cl_LL_int,self.z,axis=1)[:nell_WL,:,:]
 
         if 'GCph' in self.probe or 'WL_GCph_XC' in self.probe:
             Cl_GG_int = W_G[None,:,:,None] * W_G[None,: , None, :] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None]
-            Cl_GG     = trapz(Cl_GG_int,self.z,axis=1)[:nell_GC,:,:]
+            Cl_GG     = trapezoid(Cl_GG_int,self.z,axis=1)[:nell_GC,:,:]
 
         if 'WL_GCph_XC' in self.probe:
             Cl_LG_int = W_L[:,:,:,None] * W_G[None,: , None, :] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None]
-            Cl_LG     = trapz(Cl_LG_int,self.z,axis=1)[:nell_XC,:,:]
+            Cl_LG     = trapezoid(Cl_LG_int,self.z,axis=1)[:nell_XC,:,:]
             Cl_GL     = np.transpose(Cl_LG,(0,2,1))
 
         if printtimes:
@@ -916,15 +914,15 @@ class euclid_photometric_z_fofr(Likelihood):
             # calculate the covariance matrix error
             if 'WL' in self.probe or 'WL_GCph_XC' in self.probe:
                 El_LL_int = W_L[:,:,:,None] * W_L[:,:,None,:] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None] * alpha[:,:,None,None]
-                El_LL     = trapz(El_LL_int,self.z,axis=1)[:nell_WL,:,:]
+                El_LL     = trapezoid(El_LL_int,self.z,axis=1)[:nell_WL,:,:]
 
             if 'GCph' in self.probe or 'WL_GCph_XC' in self.probe:
                 El_GG_int = W_G[None,:,:,None] * W_G[None,: , None, :] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None] * alpha[:,:,None,None]
-                El_GG     = trapz(El_GG_int,self.z,axis=1)[:nell_GC,:,:]
+                El_GG     = trapezoid(El_GG_int,self.z,axis=1)[:nell_GC,:,:]
 
             if 'WL_GCph_XC' in self.probe:
                 El_LG_int = W_L[:,:,:,None] * W_G[None,: , None, :] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None] * alpha[:,:,None,None]
-                El_LG     = trapz(El_LG_int,self.z,axis=1)[:nell_XC,:,:]
+                El_LG     = trapezoid(El_LG_int,self.z,axis=1)[:nell_XC,:,:]
                 El_GL     = np.transpose(El_LG,(0,2,1))
 
         if printtimes:
