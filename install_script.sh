@@ -21,7 +21,7 @@ else
 pipi="pip"
 fi
 
-echo "This will create and activate the conda environment named photometric_fofR. Otherwise it will only activate the environment."
+echo "This will create and activate the conda environment named photometric_fofR."
 echo "** Please run this script as 'source install_script.sh' to allow for correct environment installation from within the terminal. **"
 read -p ">> Create or activate conda environment? Type: (Y/y/Yes/yes) for creation; Type: (activate/act) if you only want to activate an existing environment. If you type anything else, the installation script will continue in your current environment. Enter your response: " response
 if [[ $response =~ ^(Y|y|Yes|yes)$ ]]
@@ -42,42 +42,16 @@ else
     # The user did not confirm, abort the operation
     echo "Creation of conda environment aborted. Install the following packages within your preferred python environment."
     echo "Attempting pip installation"
-    read -p ">> Do you want to install the requirements.txt file with pip? Yes/No?" response
+    read -p ">> Do you want to install the requirements.txt file with pip? Yes/No? " response
     if [[ $response =~ ^(Y|y|Yes|yes)$ ]]
     then
     $pipi install -U -r requirements.txt
     fi
 fi
 
-
-read -p "Are you sure you want to proceed with the installation of packages and codes? (Y/y/Yes/yes) " response
-# Check if the response is anything other than Y, y, Yes, yes
-if [[ ! $response =~ ^(Y|y|Yes|yes)$ ]]
-then
-    # The user did not confirm, abort the operation
-    echo "Operation aborted."
-    return 0
-fi
-
-
+echo "** Moving one directory level above.."
 cd ..
-read -p ">> Do you want to git clone class? Yes/No? " response
-if [[ $response =~ ^(Y|y|Yes|yes)$ ]]
-then
-#pip install classy
-git clone git@github.com:lesgourg/class_public.git
-fi
 
-read -p ">> Do you want to install class/classy? Yes/No? " response
-if [[ $response =~ ^(Y|y|Yes|yes)$ ]]
-then
-echo "****Installing CLASS"
-cd class_public
-make clean
-make -j
-cd ..
-echo "Installation successful ****"
-fi
 
 read -p ">> Do you want to git clone MontePython? Yes/No? " response
 if [[ $response =~ ^(Y|y|Yes|yes)$ ]]
@@ -100,6 +74,35 @@ cp -vr photometric_fofR/codes/gaussianprior montepython_public/montepython/likel
 echo "** Copying react code:"
 cp -vr photometric_fofR/codes/react montepython_public/montepython/
 fi
+
+read -p "Are you sure you want to proceed with the installation of packages and codes? (Y/y/Yes/yes) " response
+# Check if the response is anything other than Y, y, Yes, yes
+if [[ ! $response =~ ^(Y|y|Yes|yes)$ ]]
+then
+    # The user did not confirm, abort the operation
+    echo "Operation aborted."
+    return 0
+fi
+
+
+read -p ">> Do you want to git clone class? Yes/No? " response
+if [[ $response =~ ^(Y|y|Yes|yes)$ ]]
+then
+#pip install classy
+git clone git@github.com:lesgourg/class_public.git
+fi
+
+read -p ">> Do you want to install class/classy? Yes/No? " response
+if [[ $response =~ ^(Y|y|Yes|yes)$ ]]
+then
+echo "****Installing CLASS"
+cd class_public
+make clean
+make -j
+cd ..
+echo "Installation successful ****"
+fi
+
 
 read -p ">> Do you want to clone the FORGE emulator and copy its code to the montepython/ directory? Yes/No? " response
 if [[ $response =~ ^(Y|y|Yes|yes)$ ]]
