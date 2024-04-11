@@ -9,17 +9,15 @@
 
 from montepython.likelihood_class import Likelihood
 
-from scipy.integrate import trapz,simpson
-from scipy import interpolate as itp
+from scipy.integrate import trapz, simpson
 from scipy.interpolate import interp1d, RectBivariateSpline
-from scipy.optimize import curve_fit
-from itertools import product
+from scipy.optimize import curve_fit, minimize
 
 import sys,os
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))
-from montepython.MGfit_Winther import pofk_enhancement ,pofk_enhancement_linear , kazuya_correktion
+from montepython.MGfit_Winther import pofk_enhancement, pofk_enhancement_linear, kazuya_correktion
 from montepython.forge_emulator.FORGE_emulator import FORGE
-
+from time import time
 
 try:
     import cosmopower as cp
@@ -53,7 +51,6 @@ class euclid_photometric_z_fofr(Likelihood):
 
     def __init__(self, path, data, command_line):
         self.debug_save  = False
-        self.debug_plot = False
         Likelihood.__init__(self, path, data, command_line)
 
         # Force the cosmological module to store Pk for redshifts up to
@@ -62,7 +59,6 @@ class euclid_photometric_z_fofr(Likelihood):
         self.need_cosmo_arguments(data, {'z_max_pk': self.zmax})
         self.need_cosmo_arguments(data, {'P_k_max_1/Mpc': 1.5*self.k_max_h_by_Mpc})
 
-
         # Compute non-linear power spectrum if requested
         if (self.use_halofit):
             self.need_cosmo_arguments(data, {'non linear':'halofit'})
@@ -70,26 +66,35 @@ class euclid_photometric_z_fofr(Likelihood):
 
 
         # Define array of l values, evenly spaced in logscale
-
         if self.lmax_WL > self.lmax_GC:
             self.l_WL = np.logspace(np.log10(self.lmin), np.log10(self.lmax_WL), num=self.lbin, endpoint=True)
             self.idx_lmax = int(np.argwhere(self.l_WL >= self.lmax_GC)[0])
             self.l_GC = self.l_WL[:self.idx_lmax+1]
             self.l_XC = self.l_WL[:self.idx_lmax+1]
             self.l_array = 'WL'
+
+            self.ells_WL = np.array(range(self.lmin,self.lmax_WL+1))
+            self.ell_jump = self.lmax_GC - self.lmin +1
+            self.ells_GC = self.ells_WL[:self.ell_jump]
+            self.ells_XC = self.ells_GC
         else:
             self.l_GC = np.logspace(np.log10(self.lmin), np.log10(self.lmax_GC), num=self.lbin, endpoint=True)
             self.idx_lmax = int(np.argwhere(self.l_GC >= self.lmax_WL)[0])
             self.l_WL = self.l_GC[:self.idx_lmax+1]
             self.l_XC = self.l_GC[:self.idx_lmax+1]
             self.l_array = 'GC'
-        #print('l array WL: ', self.l_WL)
-        #print('l array GC: ', self.l_GC)
+
+            self.ells_GC = np.array(range(self.lmin,self.lmax_GC+1))
+            self.ell_jump = self.lmax_WL - self.lmin +1
+            self.ells_WL = self.ells_GC[:self.ell_jump]
+            self.ells_XC = self.ells_WL
+
         if self.debug_save :
             np.savetxt('ls.txt',self.l_GC)
-        ########################################################
-        # Find distribution of n(z) in each bin
-        ########################################################
+
+        #########################################
+        # Find distribution of n(z) in each bin #
+        #########################################
 
         # Create the array that will contain the z boundaries for each bin.
 
@@ -124,6 +129,10 @@ class euclid_photometric_z_fofr(Likelihood):
         self.n_bar = self.gal_per_sqarcmn * (60.*180./np.pi)**2
         self.n_bar /= self.nbin
 
+        ###########################
+        # Add nuisance parameters #
+        ###########################
+
         if 'GCph' in self.probe or 'WL_GCph_XC' in self.probe:
             self.bias = np.zeros(self.nbin)
             self.bias_names = []
@@ -153,67 +162,49 @@ class euclid_photometric_z_fofr(Likelihood):
             self.nuisance += ['deta']
             self.bfcemu = BCemu.BCM_7param(verbose=False)
 
-        ###########
-        # Read data
-        ###########
+        #############
+        # Read data #
+        #############
 
-        # If the file exists, initialize the fiducial values
-        # It has been stored flat, so we use the reshape function to put it in
-        # the right shape.
-
-        if self.lmax_WL > self.lmax_GC:
-            ells_WL = np.array(range(self.lmin,self.lmax_WL+1))
-            l_jump = self.lmax_GC - self.lmin +1
-            ells_GC = ells_WL[:l_jump]
-        else:
-            ells_GC = np.array(range(self.lmin,self.lmax_GC+1))
-            l_jump = self.lmax_WL - self.lmin +1
-            ells_WL = ells_GC[:l_jump]
+        # If the file exists, read the fiducial values
         self.fid_values_exist = False
-        fid_file_path = os.path.join(self.data_directory, self.fiducial_file)
+        fid_file_path = os.path.join(self.data_directory, self.fiducial_file+'.npz')
         if os.path.exists(fid_file_path):
             self.fid_values_exist = True
-            if 'WL' in self.probe:
-                self.Cov_observ = np.zeros((len(ells_WL), self.nbin, self.nbin), 'float64')
-            if 'GCph' in self.probe:
-                self.Cov_observ = np.zeros((len(ells_GC), self.nbin, self.nbin), 'float64')
-            if 'WL_GCph_XC' in self.probe:
-                self.Cov_observ = np.zeros((l_jump, 2*self.nbin, 2*self.nbin), 'float64')
-                if self.lmax_WL > self.lmax_GC:
-                    l_high = len(ells_WL)-l_jump
-                else:
-                    l_high = len(ells_GC)-l_jump
-                self.Cov_observ_high = np.zeros(((l_high), self.nbin, self.nbin), 'float64')
-            with open(fid_file_path, 'r') as fid_file:
-                line = fid_file.readline()
-                while line.find('#') != -1:
-                    line = fid_file.readline()
-                while (line.find('\n') != -1 and len(line) == 1):
-                    line = fid_file.readline()
-                if 'WL' in self.probe:
-                    for Bin1 in range(self.nbin):
-                        for Bin2 in range(self.nbin):
-                            for nl in range(len(ells_WL)):
-                                self.Cov_observ[nl,Bin1,Bin2] = float(line)
-                                line = fid_file.readline()
-                if 'GCsp' in self.probe:
-                    for Bin1 in range(self.nbin):
-                        for Bin2 in range(self.nbin):
-                            for nl in range(len(ells_GC)):
-                                self.Cov_observ[nl,Bin1,Bin2] = float(line)
-                                line = fid_file.readline()
-                if 'WL_GCph_XC' in self.probe:
-                    for Bin1 in range(2*self.nbin):
-                        for Bin2 in range(2*self.nbin):
-                            for nl in range(l_jump):
-                                self.Cov_observ[nl,Bin1,Bin2] = float(line)
-                                line = fid_file.readline()
-                    for Bin1 in range(self.nbin):
-                        for Bin2 in range(self.nbin):
-                            for nl in range(l_high):
-                                self.Cov_observ_high[nl,Bin1,Bin2] = float(line)
-                                line = fid_file.readline()
+            fid_file = np.load(fid_file_path)
+            if fid_file['probe'] != self.probe:
+                warnings.warn("Probes in fiducial file does not match the probes asked for.\n The fiducial Probe is {} and the probe asked for is {}.\n Please procede with caution".format(fid_file['probe'],self.probe))
+            try:
+                if 'WL' in self.probe or 'WL_GCph_XC' in self.probe:
+                    l_WL = fid_file['ells_LL']
+                    if not np.isclose(l_WL,self.l_WL).all():
+                        raise Exception("Maximum multipole of WL has changed between fiducial and now.\n Fiducial lmax = {}, new lmax = {}. \n Please remove old fiducial and generate a new one".format(max(l_WL),max(self.l_WL)))
+                    Cl_LL = fid_file['Cl_LL']
+                    inter_LL = interp1d(l_WL,Cl_LL,axis=0, kind='cubic',fill_value="extrapolate")(self.ells_WL)
+                    self.Cov_observ = inter_LL
 
+                if 'GCph' in self.probe or 'WL_GCph_XC' in self.probe:
+                    l_GC = fid_file['ells_GG']
+                    if not np.isclose(l_GC,self.l_GC).all():
+                        raise Exception("Maximum multipole of GC has changed between fiducial and now.\n Fiducial lmax = {}, new lmax = {}. \n Please remove old fiducial and generate a new one".format(max(l_GC),max(self.l_GC)))
+                    Cl_GG = fid_file['Cl_GG']
+                    inter_GG = interp1d(l_GC,Cl_GG,axis=0, kind='cubic',fill_value="extrapolate")(self.ells_GC)
+                    self.Cov_observ = inter_GG
+
+                if 'WL_GCph_XC' in self.probe:
+                    l_XC = fid_file['ells_GL']
+                    Cl_GL = fid_file['Cl_GL']
+                    inter_GL = interp1d(l_XC,Cl_GL,axis=0, kind='cubic',fill_value="extrapolate")(self.ells_XC)
+                    inter_LG = np.transpose(inter_GL,(0,2,1))
+                    if self.lmax_WL > self.lmax_GC:
+                        self.Cov_observ = np.block([[inter_LL[:self.ell_jump,:,:],inter_LG],[inter_GL,inter_GG]])
+                        self.Cov_observ_high = inter_LL[self.ell_jump:,:,:]
+                    else:
+                        self.Cov_observ = np.block([[inter_LL,inter_LG],[inter_GL,inter_GG[:self.ell_jump,:,:]]])
+                        self.Cov_observ_high = inter_GG[self.ell_jump:,:,:]
+
+            except KeyError:
+                raise KeyError("The probe asked for in the survey specifications is not in the fiducial file. \n Please remove old fiducial and generate a new one")
         else:
             if self.fit_different_data:
                 self.use_fofR = self.data_use_fofR
@@ -312,12 +303,16 @@ class euclid_photometric_z_fofr(Likelihood):
         Boost = np.array([pofk_enhancement_linear(0,fR0,ki/h) for ki in k])
 
         Integr= np.power(k*W,2)*Pk*Boost/(2*np.pi**2)
-        sigma8= np.sqrt(simpson( Integr, k)) * kazuya_correktion(lgfR0)
+        sigma8= np.sqrt(simpson( Integr, x=k)) * kazuya_correktion(lgfR0)
 
         return sigma8
 
 
     def loglkl(self, cosmo, data):
+
+        printtimes = False
+        if printtimes:
+            t_start = time()
 
         # One wants to obtain here the relation between z and r, this is done
         # by asking the cosmological module with the function z_of_r
@@ -362,6 +357,10 @@ class euclid_photometric_z_fofr(Likelihood):
                     self.bias[ibin] = data.mcmc_parameters[self.bias_names[ibin]]['current']*data.mcmc_parameters[self.bias_names[ibin]]['scale']
                 self.biasfunc = interp1d(self.z_bin_center, self.bias, bounds_error=False, fill_value="extrapolate")
 
+        if printtimes:
+            t_init = time()
+            print("Initalisation Time:", t_init-t_start)
+
         ######################
         # Get power spectrum #
         ######################
@@ -393,6 +392,10 @@ class euclid_photometric_z_fofr(Likelihood):
 
         Pk = pk_m_nl
 
+        if printtimes:
+            t_power = time()
+            print("Power Spectrum obtained in:", t_power-t_init)
+
         ########################
         # Boosts and Emulators #
         ########################
@@ -401,12 +404,6 @@ class euclid_photometric_z_fofr(Likelihood):
             print("f(R) active with Winther fitting function")
             lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
             f_R0=np.power(10,-1*lgfR0)
-
-#            boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
-#            for index_l, index_z in index_pknn:
-#                boost_m_nl_fofR[index_l, index_z]= pofk_enhancement(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h(),hasBug=self.use_bug)
-#
-#            Pk *= boost_m_nl_fofR
 
             fofR_zmax = 2
             fofR_kmax = 10*cosmo.h() #In 1/Mpc
@@ -473,13 +470,6 @@ class euclid_photometric_z_fofr(Likelihood):
             fofR_kmax = 10*cosmo.h() #In 1/Mpc
             fofR_boost = lambda k_l, z_l: Bk_interp(z_l, k_l / cosmo.h())
 
-            # boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
-
-            # for index_l, index_z in index_pknn:
-            #     boost_m_nl_fofR[index_l, index_z]= Bk_interp(self.z[index_z],k[index_l,index_z]/hubble)
-
-            # Pk *= boost_m_nl_fofR
-
 
         if self.use_fofR == 'ReACT':
             # Halo model reaction based boost. Emulator based on output from ReACT and HMCode2020 (for pseudo and LCDM)
@@ -487,14 +477,10 @@ class euclid_photometric_z_fofr(Likelihood):
             # Includes massive neutrinos which are here set to 0 manually
 
             # TODO:
-            # Extract omnuh2 from data vector (trivial ... )
             # Optimise clipping and setting boost = 1 for z>zmax
             # Extrapolate to small k? Perhaps not necessary as boost should be 1 at kmin = 0.01h/Mpc ....
 
             print("f(R) active with ReACT")
-
-            # Empty arrays to store nonlinear and linear boosts
-            boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
 
             # Set parameters for the emulator
             lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
@@ -565,47 +551,11 @@ class euclid_photometric_z_fofr(Likelihood):
             fofR_kmax = 3*cosmo.h() #In 1/Mpc
             fofR_boost = lambda k_l, z_l: ReACT_interp(z_l, k_l / cosmo.h())
 
-            # # Extrapolate to high values of k
-            # # Values to extrapolate to
-            # mykmax = 50
-            # mykmin = kvals[-1]+0.01
-            # N_grid = 300
-
-            # # Create k bins at which to extrapolate to
-            # k_extrapolate = np.linspace(mykmin, mykmax , N_grid)
-
-            # # Array to store extrapolated values
-            # Bk_ext=[]
-
-            # #Extrapolate only for redshifts where boost is non-trivial, otherwise it is 1
-            # for index_z in range(nz_Pk):
-            #     if(self.z[index_z]<=zmax):
-            #         Bk_ext.append(interp1d(kvals,Boost[index_z],fill_value='extrapolate')(k_extrapolate))
-            #     else:
-            #         Bk_ext.append(np.ones(N_grid))
-
-            # # Attach extended k-grid and boosts to emulator's grid and boosts
-            # concatenated_boost = np.hstack((Boost,Bk_ext))
-            # concatenated_k = np.hstack((kvals, k_extrapolate))
-
-            # # Spline final function which now extends to mykmax using a power law extrapolation
-            # Bk_interp = RectBivariateSpline(self.z,concatenated_k,concatenated_boost)
-
-            # # Fill up boost array
-            # for index_l, index_z in index_pknn:
-            #     boost_m_nl_fofR[index_l, index_z] = Bk_interp(self.z[index_z],k[index_l,index_z]/hubble)
-
-
-            # # Apply the boost
-            # Pk *= boost_m_nl_fofR
-
-
         elif self.use_fofR == 'emantis':
             print("f(R) active with e-MANTIS emulator")
 
             lgfR0 = data.mcmc_parameters['lgfR0']['current']*data.mcmc_parameters['lgfR0']['scale']
             f_R0=np.power(10,-1*lgfR0)
-            boost_m_nl_fofR = np.zeros((self.lbin, self.nzmax), 'float64')
 
             Omc = cosmo.Omega0_cdm()
             Omb = cosmo.Omega_b()
@@ -633,38 +583,14 @@ class euclid_photometric_z_fofr(Likelihood):
 
             fofR_boost = lambda k, z: interp_Boost(z,k)
 
-            # # Init. emantis prediction array.
-            # emantis_boost = np.ones((self.z.shape[0], 1, k_flat.shape[0]))
-
-            # # Flatten k array.
-            # k_flat = np.ravel(k)
-            # k_extrap_idx = k_flat > kmax
-
-            # pred= self.emantis.predict_boost(emantis_Omm, emantis_s8, lgfR0, 1/(1+self.z), k_flat[~k_extrap_idx]/hubble)
-            # emantis_boost[:,:,~k_extrap_idx] = pred
-
-
-            # # Constant extrapolation for k>kmax.
-            # # This seems like a messy way to do it, but in any case it should be replaced by a common extrapolation
-            # # for all types of predictions.
-            # # Get emantis predictions for k=kmax.
-            # pred_kmax = self.emantis.predict_boost(Omm, cosmo.sigma8(), lgfR0, 1/(1+self.z), kmax/hubble)
-            # for i in range(k_flat.shape[0]):
-            #     if k_extrap_idx[i]:
-            #         emantis_boost[:,:,i] = pred_kmax[:,:,0]
-
-            # for index_l, index_z in index_pknn:
-            #     # Select the required z and k.
-            #     idx_k_flat = np.ravel_multi_index((index_l, index_z), k.shape)
-            #     boost_m_nl_fofR[index_l, index_z] = emantis_boost[index_z, 0, idx_k_flat]
-
-            # # Apply the boost
-            # Pk *= boost_m_nl_fofR
-
         #Obtain derived quantity
         if self.use_fofR != False:
             if 'sigma8_fofR' in data.get_mcmc_parameters(['derived_lkl']):
                 data.derived_lkl={'sigma8_fofR':self.get_sigma8_fofR(k_grid,Pk_m_l_grid[:,-1],cosmo.h(),lgfR0)}
+
+        if printtimes:
+            t_boost = time()
+            print("Boost Initialized in:", t_boost-t_power)
 
         ##########################################
         # Extrapolation for the Different boosts #
@@ -676,9 +602,7 @@ class euclid_photometric_z_fofr(Likelihood):
         To be safe the boost is caped at 2
         """
 
-
-        Extrapolate = True
-        if self.use_fofR != False and Extrapolate:
+        if self.use_fofR != False:
             # Setup the grid on which we will do the fitting
             k_cut = np.geomspace(0.8*fofR_kmax,fofR_kmax,5)
             z_cut = np.linspace(0.8*fofR_zmax,fofR_zmax ,5)
@@ -715,10 +639,14 @@ class euclid_photometric_z_fofr(Likelihood):
                     return np.clip(fofR_boost(np.clip(k,0.01,fofR_kmax),np.minimum(z,fofR_zmax))*(np.maximum(z,fofR_zmax)/fofR_zmax)**gammaz_k(np.clip(k,0.01,fofR_kmax))*(np.maximum(k,fofR_kmax)/fofR_kmax)**gammak_z(np.minimum(z,fofR_zmax)),1,2)
 
             boost_m_nl_fofR = np.ones_like(k)
-            for index_l, index_z in index_pknn:
-                boost_m_nl_fofR[index_l,index_z] = Boost_extrapolation(k[index_l,index_z],self.z[index_z])
+            for index_z, z_value in enumerate(self.z):
+                pknn_mask = np.where((k[:,index_z]>kmin_in_inv_Mpc) & (k[:,index_z]<kmax_in_inv_Mpc))
+                boost_m_nl_fofR[pknn_mask,index_z] = Boost_extrapolation(k[pknn_mask,index_z],z_value)
             Pk *= boost_m_nl_fofR
 
+        if printtimes:
+            t_extra = time()
+            print("extrapolation done in:", t_extra - t_boost)
 
         if self.use_BCemu:
             # baryonic feedback modifications are only applied to k>kmin_bfc
@@ -733,19 +661,19 @@ class euclid_photometric_z_fofr(Likelihood):
             nu_log10Mc = 0
             nu_thej = 0
             nu_deta = 0
-
+            ##params are set to the fiducial of BCemu
             bcemu_dict ={
             'log10Mc' : log10Mc,
             'nu_Mc'   : nu_log10Mc,
-            'mu'      : 1.0,
+            'mu'      : 0.93, 
             'nu_mu'   : 0.0,
             'thej'    : thej,
             'nu_thej' : nu_thej,
-            'gamma'   : 2.5,
+            'gamma'   : 2.25,
             'nu_gamma': 0.0,
-            'delta'   : 7.0,
+            'delta'   : 6.40,
             'nu_delta': 0.0,
-            'eta'     : 0.2,
+            'eta'     : 0.15,
             'nu_eta'  : 0.0,
             'deta'    : deta,
             'nu_deta' : nu_deta
@@ -792,6 +720,10 @@ class euclid_photometric_z_fofr(Likelihood):
 
             Pk *= boost_m_nl_BCemu
 
+        if printtimes:
+            t_baryon = time()
+            print("Baryonic Feedback calculated in:", t_baryon-t_extra)
+
         ####################
         # Get Growthfactor #
         ####################
@@ -812,6 +744,10 @@ class euclid_photometric_z_fofr(Likelihood):
                 D_z_boost[index_l,index_z] = np.sqrt(pofk_enhancement_linear(self.z[index_z],f_R0,k[index_l,index_z]/cosmo.h()) /\
                                                      pofk_enhancement_linear(              0,f_R0,k[index_l,index_z]/cosmo.h()))
             D_z  *=  D_z_boost
+
+        if printtimes:
+            t_growth = time()
+            print("growthfactor obtained in", t_growth-t_baryon)
 
         ################################################
         # Window functions W_L(l,z,bin) and W_G(z,bin) #
@@ -851,6 +787,10 @@ class euclid_photometric_z_fofr(Likelihood):
                 W_G = np.zeros((self.nzmax, self.nbin), 'float64')
                 W_G =  (H_z * self.biasfunc(self.z))[:,None] * self.eta_z
 
+        if printtimes:
+            t_window = time()
+            print("window function obtained in:", t_window-t_growth)
+
         ###########
         # Calc Cl #
         ###########
@@ -874,11 +814,16 @@ class euclid_photometric_z_fofr(Likelihood):
             Cl_LG     = trapz(Cl_LG_int,self.z,axis=1)[:nell_XC,:,:]
             Cl_GL     = np.transpose(Cl_LG,(0,2,1))
 
+        if printtimes:
+            t_cell = time()
+            print("Cell calculated in:", t_cell-t_window)
+
         ####################
         # Plot Pk and Cl's #
         ####################
 
-        if self.debug_plot == True:
+        Plot_debug = False
+        if Plot_debug == True:
             print("For debug, returning Cls")
             return k, self.z, Pk, Cl_LL, Cl_GG, Cl_LG, Cl_GL
 
@@ -902,9 +847,13 @@ class euclid_photometric_z_fofr(Likelihood):
             if 'GCph' in self.probe:
                 np.savez(debug_file_path, ells_GG=self.l_GC, Cl_GG = Cl_GG)
 
-        ##########
-        # Noise
-        ##########
+        if printtimes:
+            t_debug = time()
+            print("Debug options obtained in:" , t_debug-t_cell)
+
+        #########
+        # Noise #
+        #########
         # dimensionless
 
         self.noise = {
@@ -923,95 +872,64 @@ class euclid_photometric_z_fofr(Likelihood):
                 Cl_GL[:,i,i] += self.noise['GL']
                 Cl_LG[:,i,i] += self.noise['LG']
 
-        #############
-        # Spline Cl #
-        #############
-        # Find C(l) for every integer l
+        #####################
+        # Theoretical Error #
+        #####################
+        """If the inclusion of theoretical errors for modified gravity are asked for will follow the description found in 1210.2194.
+        The recepie has been adjusted to also work with the full 3x2pt probe.
+        Any other source of theorerical error must be added seperately in the computation of the relative theoretical error.
+        """
 
-        # Spline the Cls along l
-        if 'WL' in self.probe or 'WL_GCph_XC' in self.probe:
-            spline_LL = np.empty((self.nbin, self.nbin),dtype=(list,3))
-            for Bin1 in range(self.nbin):
-                for Bin2 in range(self.nbin):
-                    spline_LL[Bin1,Bin2] = list(itp.splrep(
-                        self.l_WL[:], Cl_LL[:,Bin1,Bin2]))
+        if self.theoretical_error != False:
 
-        if 'GCph' in self.probe or 'WL_GCph_XC' in self.probe:
-            spline_GG = np.empty((self.nbin, self.nbin), dtype=(list,3))
-            for Bin1 in range(self.nbin):
-                for Bin2 in range(self.nbin):
-                    spline_GG[Bin1,Bin2] = list(itp.splrep(
-                        self.l_GC[:], Cl_GG[:,Bin1,Bin2]))
+            #calculate the relative theoretical error
+            alpha = np.zeros_like(k)
+            if self.use_fofR != False and self.theoretical_error == 'simple_fR':
+                # In the simple case we set the relative theoretical error to be 2% of the boost
+                alpha = boost_m_nl_fofR*self.fR_error
 
-        if 'WL_GCph_XC' in self.probe:
-            spline_LG = np.empty((self.nbin, self.nbin), dtype=(list,3))
-            spline_GL = np.empty((self.nbin, self.nbin), dtype=(list,3))
-            for Bin1 in range(self.nbin):
-                for Bin2 in range(self.nbin):
-                    spline_LG[Bin1,Bin2] = list(itp.splrep(
-                        self.l_XC[:], Cl_LG[:,Bin1,Bin2]))
-                    spline_GL[Bin1,Bin2] = list(itp.splrep(
-                        self.l_XC[:], Cl_GL[:,Bin1,Bin2]))
+            elif self.use_fofR != False and self.theoretical_error == 'react_cast':
+                # obtained fits from ratio of ReACT with Forge at HS6.
+                def A_plateau(z):
+                    Delta = 0.0356204
+                    Base = 0.029017
+                    Temperature = 0.06154762
+                    potential = 0.56233084
+                    return Delta / (np.exp((z-potential) / Temperature)+1)+Base
+                
+                def k_plateau(z):
+                    kinf = 0.20253502 
+                    pos = 1.55716999 
+                    sigma = 0.55169064
+                    return kinf*np.exp(np.tanh((z-pos)/sigma))
 
-        # Create array of all integers of l
-        if self.lmax_WL > self.lmax_GC:
-            ells_WL = np.array(range(self.lmin,self.lmax_WL+1))
-            l_jump = self.lmax_GC - self.lmin +1
-            ells_GC = ells_WL[:l_jump]
-        else:
-            ells_GC = np.array(range(self.lmin,self.lmax_GC+1))
-            l_jump = self.lmax_WL - self.lmin +1
-            ells_WL = ells_GC[:l_jump]
+                def smoothish_step(x):
+                    return (np.power(x,2)+x)/(np.power(x,2)+x+1)
+                
+                for index_z, z_value in enumerate(self.z):
+                    pknn_mask = np.where((k[:,index_z]>kmin_in_inv_Mpc) & (k[:,index_z]<kmax_in_inv_Mpc))
+                    alpha[pknn_mask,index_z] = A_plateau(z_value) * smoothish_step(k[pknn_mask,index_z]/k_plateau(z_value))                
 
-        if 'WL_GCph_XC' in self.probe:
-
-            Cov_theory = np.zeros((l_jump, 2*self.nbin, 2*self.nbin), 'float64')
-            if self.lmax_WL > self.lmax_GC:
-                Cov_theory_high = np.zeros(((len(ells_WL)-l_jump), self.nbin, self.nbin), 'float64')
             else:
-                Cov_theory_high = np.zeros(((len(ells_GC)-l_jump), self.nbin, self.nbin), 'float64')
-        elif 'WL' in self.probe:
-            Cov_theory = np.zeros((len(ells_WL), self.nbin, self.nbin), 'float64')
-        elif 'GCph' in self.probe:
-            Cov_theory = np.zeros((len(ells_GC), self.nbin, self.nbin), 'float64')
+                raise Exception("Theorerical error model not recognized. Please choose from 'simple_fR' or ...")
 
-        for Bin1 in range(self.nbin):
-            for Bin2 in range(self.nbin):
-                if 'WL_GCph_XC' in self.probe:
-                    if self.lmax_WL > self.lmax_GC:
-                        Cov_theory[:,Bin1,Bin2] = itp.splev(
-                            ells_GC[:], spline_LL[Bin1,Bin2])
-                        Cov_theory[:,self.nbin+Bin1,Bin2] = itp.splev(
-                            ells_GC[:], spline_GL[Bin1,Bin2])
-                        Cov_theory[:,Bin1,self.nbin+Bin2] = itp.splev(
-                            ells_GC[:], spline_LG[Bin1,Bin2])
-                        Cov_theory[:,self.nbin+Bin1,self.nbin+Bin2] = itp.splev(
-                            ells_GC[:], spline_GG[Bin1,Bin2])
+            # calculate the covariance matrix error
+            if 'WL' in self.probe or 'WL_GCph_XC' in self.probe:
+                El_LL_int = W_L[:,:,:,None] * W_L[:,:,None,:] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None] * alpha[:,:,None,None]
+                El_LL     = trapz(El_LL_int,self.z,axis=1)[:nell_WL,:,:]
 
-                        Cov_theory_high[:,Bin1,Bin2] = itp.splev(
-                            ells_WL[l_jump:], spline_LL[Bin1,Bin2])
-                    else:
-                        Cov_theory[:,Bin1,Bin2] = itp.splev(
-                            ells_WL[:], spline_LL[Bin1,Bin2])
-                        Cov_theory[:,self.nbin+Bin1,Bin2] = itp.splev(
-                            ells_WL[:], spline_GL[Bin1,Bin2])
-                        Cov_theory[:,Bin1,self.nbin+Bin2] = itp.splev(
-                            ells_WL[:], spline_LG[Bin1,Bin2])
-                        Cov_theory[:,self.nbin+Bin1,self.nbin+Bin2] = itp.splev(
-                            ells_WL[:], spline_GG[Bin1,Bin2])
+            if 'GCph' in self.probe or 'WL_GCph_XC' in self.probe:
+                El_GG_int = W_G[None,:,:,None] * W_G[None,: , None, :] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None] * alpha[:,:,None,None]
+                El_GG     = trapz(El_GG_int,self.z,axis=1)[:nell_GC,:,:]
 
-                        Cov_theory_high[:,Bin1,Bin2] = itp.splev(
-                            ells_GC[l_jump:], spline_LL[Bin1,Bin2])
+            if 'WL_GCph_XC' in self.probe:
+                El_LG_int = W_L[:,:,:,None] * W_G[None,: , None, :] * Pk[:,:,None,None] / H_z[None,:,None,None] / self.r[None,:,None,None] / self.r[None,:,None,None] * alpha[:,:,None,None]
+                El_LG     = trapz(El_LG_int,self.z,axis=1)[:nell_XC,:,:]
+                El_GL     = np.transpose(El_LG,(0,2,1))
 
-                elif 'WL' in self.probe:
-                    Cov_theory[:,Bin1,Bin2] = itp.splev(
-                        ells_WL[:], spline_LL[Bin1,Bin2])
-
-                elif 'GCph' in self.probe:
-                    Cov_theory[:,Bin1,Bin2] = itp.splev(
-                        ells_GC[:], spline_GG[Bin1,Bin2])
-
-        #print('Cov_theory: ', Cov_theory[1,2,3])
+        if printtimes:
+            t_therr = time()
+            print("Theoretical errors obtained in:" , t_therr-t_debug)
 
         #######################
         # Create fiducial file
@@ -1019,100 +937,255 @@ class euclid_photometric_z_fofr(Likelihood):
 
         if self.fid_values_exist is False:
             # Store the values now, and exit.
-            fid_file_path = os.path.join(
-                self.data_directory, self.fiducial_file)
-            with open(fid_file_path, 'w') as fid_file:
-                fid_file.write('# Fiducial parameters')
-                for key, value in data.mcmc_parameters.items():
-                    fid_file.write(
-                        ', %s = %.5g' % (key, value['current']*value['scale']))
-                fid_file.write('\n')
-                if 'WL' in self.probe or 'GCph' in self.probe:
-                    for Bin1 in range(self.nbin):
-                        for Bin2 in range(self.nbin):
-                            for nl in range(len(Cov_theory[:,0,0])):
-                                fid_file.write("%.55g\n" % Cov_theory[nl, Bin1, Bin2])
-                if 'WL_GCph_XC' in self.probe:
-                    for Bin1 in range(2*self.nbin):
-                        for Bin2 in range(2*self.nbin):
-                            for nl in range(len(Cov_theory[:,0,0])):
-                                fid_file.write("%.55g\n" % Cov_theory[nl, Bin1, Bin2])
-                    for Bin1 in range(self.nbin):
-                        for Bin2 in range(self.nbin):
-                            for nl in range(len(Cov_theory_high[:,0,0])):
-                                fid_file.write("%.55g\n" % Cov_theory_high[nl, Bin1, Bin2])
-            print('\n')
+            fid_file_path = os.path.join(self.data_directory, self.fiducial_file)
+            fiducial_cosmo = dict()
+            for key, value in data.mcmc_parameters.items():
+                    fiducial_cosmo[key] = value['current']*value['scale']
+
+            if 'WL_GCph_XC' in self.probe:
+                np.savez(fid_file_path,fid_cosmo=fiducial_cosmo, probe=self.probe, ells_LL=self.l_WL, ells_GG=self.l_GC, ells_GL=self.l_XC, Cl_LL = Cl_LL, Cl_GG = Cl_GG, Cl_GL = Cl_GL)
+            if 'WL' in self.probe:
+                np.savez(fid_file_path,fid_cosmo=fiducial_cosmo, probe=self.probe, ells_LL=self.l_WL, Cl_LL = Cl_LL)
+            if 'GCph' in self.probe:
+                np.savez(fid_file_path,fid_cosmo=fiducial_cosmo, probe=self.probe, ells_GG=self.l_GC, Cl_GG = Cl_GG)
+
             warnings.warn(
                 "Writing fiducial model in %s, for %s likelihood\n" % (
                     self.data_directory+'/'+self.fiducial_file, self.name))
             return 1j
 
+        #############
+        # Spline Cl #
+        #############
+        # Find C(l) for every integer l
+        if 'WL' in self.probe or 'WL_GCph_XC' in self.probe:
+            inter_LL = interp1d(self.l_WL,Cl_LL,axis=0, kind='cubic',fill_value="extrapolate")(self.ells_WL)
+            Cov_theory = inter_LL
+            ells = self.ells_WL
+        if 'GCph' in self.probe or 'WL_GCph_XC' in self.probe:
+            inter_GG = interp1d(self.l_GC,Cl_GG,axis=0, kind='cubic',fill_value="extrapolate")(self.ells_GC)
+            Cov_theory = inter_GG
+            ells = self.ells_GC
+        if 'WL_GCph_XC' in self.probe:
+            inter_GL = interp1d(self.l_XC,Cl_GL,axis=0, kind='cubic',fill_value="extrapolate")(self.ells_XC)
+            inter_LG = np.transpose(inter_GL,(0,2,1))
+            if self.lmax_WL > self.lmax_GC:
+                Cov_theory = np.block([[inter_LL[:self.ell_jump,:,:],inter_LG],[inter_GL,inter_GG]])
+                Cov_theory_high = inter_LL[self.ell_jump:,:,:]
+                ells = self.ells_WL
+            else:
+                Cov_theory = np.block([[inter_LL,inter_LG],[inter_GL,inter_GG[:self.ell_jump,:,:]]])
+                Cov_theory_high = inter_GG[self.ell_jump:,:,:]
+                ells = self.ells_GC
+
+        T_Rerr = np.zeros_like(Cov_theory)
+        if 'WL_GCph_XC' in self.probe:
+            T_Rerr_high = np.zeros_like(Cov_theory_high)
+
+        if self.theoretical_error != False:
+            # Find the theoretical error matrix for every interger l
+            if 'WL' in self.probe or 'WL_GCph_XC' in self.probe:
+                inter_LL = interp1d(self.l_WL,El_LL,axis=0, kind='cubic',fill_value="extrapolate")(self.ells_WL)
+                norm = np.sqrt(self.lmax_WL - self.lmin + 1)
+                T_Rerr =  norm * inter_LL
+            if 'GCph' in self.probe or 'WL_GCph_XC' in self.probe:
+                inter_GG = interp1d(self.l_GC,El_GG,axis=0, kind='cubic',fill_value="extrapolate")(self.ells_GC)
+                norm = np.sqrt(self.lmax_GC - self.lmin + 1)
+                T_Rerr =  norm * inter_GG
+            if 'WL_GCph_XC' in self.probe:
+                inter_GL = interp1d(self.l_XC,El_GL,axis=0, kind='cubic',fill_value="extrapolate")(self.ells_XC)
+                inter_LG = np.transpose(inter_GL,(0,2,1))
+                norm = np.sqrt(np.maximum(self.lmax_WL,self.lmax_GC) - self.lmin + 1)
+                if self.lmax_WL > self.lmax_GC:
+                    T_Rerr = norm * np.block([[inter_LL[:self.ell_jump,:,:],inter_LG],[inter_GL,inter_GG]])
+                    T_Rerr_high = norm * inter_LL[self.ell_jump:,:,:]
+                else:
+                    T_Rerr = norm * np.block([[inter_LL,inter_LG],[inter_GL,inter_GG[:self.ell_jump,:,:]]])
+                    T_Rerr_high = norm * inter_GG[self.ell_jump:,:,:]
+
+        if printtimes:
+            t_spline = time()
+            print("Cell Splined in:", t_spline-t_therr)
+
         ######################
         # Compute likelihood
         ######################
-        # Define cov theory and observ on the whole integer range of ell values
 
-        chi2 = 0.
+        if 'WL' in self.probe or 'GCph' in self.probe:
+            compute_chiq = lambda eps: self.compute_chiq(eps, ells, self.Cov_observ, Cov_theory, T_Rerr)
+            jac = lambda eps: self.jac(eps, ells, self.Cov_observ, Cov_theory, T_Rerr)
 
-        if 'WL_GCph_XC' in self.probe:
-            if self.lmax_WL > self.lmax_GC:
-                ells = ells_WL
+        elif 'WL_GCph_XC' in self.probe:
+            compute_chiq = lambda eps: self.compute_chiq(eps, ells, self.Cov_observ, Cov_theory, T_Rerr, self.Cov_observ_high, Cov_theory_high, T_Rerr_high)
+            jac = lambda eps: self.jac(eps, ells, self.Cov_observ, Cov_theory, T_Rerr, self.Cov_observ_high, Cov_theory_high, T_Rerr_high)
+
+        eps_l = np.zeros_like(ells)
+        if self.theoretical_error != False:
+            do_binned = True
+            if do_binned:
+                if 'WL' in self.probe or 'GCph' in self.probe:
+                    if 'WL' in self.probe:
+                        ells_binned = np.unique(np.geomspace(self.lmin,self.lmax_WL, self.lbin, dtype = np.uint64))
+                    if 'GCph' in self.probe:
+                        ells_binned = np.unique(np.geomspace(self.lmin,self.lmax_GC, self.lbin, dtype = np.uint64))
+                    index_low = ells_binned - self.lmin
+
+                elif 'WL_GCph_XC' in self.probe:
+                        ells_binned = np.unique(np.geomspace(self.lmin,np.maximum(self.lmax_WL,self.lmax_GC), self.lbin, dtype = np.uint64))
+                        index_low = ells_binned[np.where(ells_binned < self.ell_jump)] - self.lmin
+                        index_high = ells_binned[np.where(ells_binned >= self.ell_jump)] - self.ell_jump - self.lmin
+
+                eps_binned = np.zeros_like(ells_binned)
+                if 'WL' in self.probe or 'GCph' in self.probe:
+                    Cov_obs_binned = self.Cov_observ[index_low]
+                    Cov_the_binned = Cov_theory[index_low]
+                    T_Rerr_binned = T_Rerr[index_low]
+
+                    chisq_binned = lambda eps : self.compute_chiq(eps, ells_binned, Cov_obs_binned, Cov_the_binned, T_Rerr_binned)
+                    jac_binned = lambda eps : self.jac(eps, ells_binned, Cov_obs_binned, Cov_the_binned, T_Rerr_binned)
+
+                elif 'WL_GCph_XC' in self.probe:
+                    Cov_obs_binned = self.Cov_observ[index_low]
+                    Cov_the_binned = Cov_theory[index_low]
+                    T_Rerr_binned = T_Rerr[index_low]
+                    Cov_obs_binned_high = self.Cov_observ_high[index_high]
+                    Cov_the_binned_high = Cov_theory_high[index_high]
+                    T_Rerr_binned_high = T_Rerr_high[index_high]
+
+                    chisq_binned = lambda eps : self.compute_chiq(eps, ells_binned, Cov_obs_binned, Cov_the_binned, T_Rerr_binned, Cov_obs_binned_high, Cov_the_binned_high, T_Rerr_binned_high)
+                    jac_binned = lambda eps : self.jac(eps, ells_binned, Cov_obs_binned, Cov_the_binned, T_Rerr_binned, Cov_obs_binned_high, Cov_the_binned_high, T_Rerr_binned_high)
+                
+                res = minimize(chisq_binned, eps_binned, tol=1e-3, method='Newton-CG',jac=jac_binned, hess='3-point')
+                eps_binned = res.x
+                eps_l = interp1d(ells_binned, eps_binned, kind='cubic',fill_value="extrapolate")(ells)
             else:
-                ells = ells_GC
+                res = minimize(compute_chiq, eps_l, tol=1e-3, method='Newton-CG',jac=jac, hess='3-point')
+                eps_l = res.x
 
-            d_the = np.linalg.det(Cov_theory)
-            d_obs = np.linalg.det(self.Cov_observ)
-            d_mix = np.zeros_like(d_the)
-            for i in range(2*self.nbin):
-                newCov = Cov_theory.copy()
-                newCov[:, i] = self.Cov_observ[:, :, i]
-                d_mix += np.linalg.det(newCov)
+        chi2 = compute_chiq(eps_l)
 
-            d_the_high = np.linalg.det(Cov_theory_high)
-            d_obs_high = np.linalg.det(self.Cov_observ_high)
-            d_mix_high = np.zeros_like(d_the_high)
-            for i in range(self.nbin):
-                newCov = Cov_theory_high.copy()
-                newCov[:, i] = self.Cov_observ_high[:, :, i]
-                d_mix_high += np.linalg.det(newCov)
-
-            N =np.ones_like(ells)*2*self.nbin
-            N[np.where(ells>self.lmax_XC)] = self.nbin
-
-            d_the = np.concatenate([d_the,d_the_high])
-            d_obs = np.concatenate([d_obs,d_obs_high])
-            d_mix = np.concatenate([d_mix,d_mix_high])
-
-            chi2 += np.sum((2*ells+1)*self.fsky*((d_mix/d_the)+np.log(d_the/d_obs)-N))
-
-        elif 'WL' in self.probe:
-            d_the = np.linalg.det(Cov_theory)
-            d_obs = np.linalg.det(self.Cov_observ)
-            d_mix = np.zeros_like(d_the)
-            for i in range(self.nbin):
-                newCov = np.copy(Cov_theory)
-                newCov[:, i] = self.Cov_observ[:, :, i]
-                d_mix += np.linalg.det(newCov)
-
-            N =np.ones_like(ells_WL)*self.nbin
-
-            chi2 += np.sum((2*ells_WL+1)*self.fsky*((d_mix/d_the)+np.log(d_the/d_obs)-N))
-
-        elif 'GCph' in self.probe:
-            d_the = np.linalg.det(Cov_theory)
-            d_obs = np.linalg.det(self.Cov_observ)
-            d_mix = np.zeros_like(d_the)
-            for i in range(self.nbin):
-                newCov = np.copy(Cov_theory)
-                newCov[:, i] = self.Cov_observ[:, :, i]
-                d_mix += np.linalg.det(newCov)
-
-            N =np.ones_like(ells_GC)*self.nbin
-
-            chi2 += np.sum((2*ells_GC+1)*self.fsky*((d_mix/d_the)+np.log(d_the/d_obs)-N))
+        if printtimes:
+            t_lkl = time()
+            print("Likelihood calculated in:" ,t_lkl-t_spline)
+            print("Total time taken:", t_lkl-t_start)
 
         print("euclid photometric: chi2 = ",chi2)
         return -chi2/2.
+
+    # Comopute the log likelihood for a given set of multipoles
+    def compute_chiq(self, eps_l, ells, Cov_observ, Cov_theory, T_Rerr, Cov_observ_high=None, Cov_theory_high=None, T_Rerr_high=None):
+
+        # find the  #redshift bins X #probes from the covariance matrix
+        nbin = Cov_observ.shape[1]
+        # find the multipole with the jump
+        ell_jump = Cov_observ.shape[0]
+
+        # calculate the necesarry determinants
+        shifted_Cov = Cov_theory + eps_l[:ell_jump, None, None] * T_Rerr
+        dtilde_the = np.linalg.det(shifted_Cov)
+
+        d_obs = np.linalg.det(Cov_observ)
+
+        dtilde_mix = np.zeros_like(dtilde_the)
+        for i in range(nbin):
+            newCov = np.copy(shifted_Cov)
+            newCov[:, i] = Cov_observ[:, :, i]
+            dtilde_mix += np.linalg.det(newCov)
+
+        N = np.ones_like(ells) * nbin
+
+        # if the probe is 3x2pt calculate the part with no cross correlation
+        if "WL_GCph_XC" in self.probe:
+
+            nbin = Cov_observ_high.shape[1]
+
+            shifted_Cov_high = Cov_theory_high + eps_l[ell_jump:, None, None] * T_Rerr_high
+            dtilde_the_high = np.linalg.det(shifted_Cov_high)
+
+            d_obs_high = np.linalg.det(Cov_observ_high)
+
+            dtilde_mix_high = np.zeros_like(dtilde_the_high)
+            for i in range(nbin):
+                newCov = np.copy(shifted_Cov_high)
+                newCov[:, i] = Cov_observ_high[:, :, i]
+                dtilde_mix_high += np.linalg.det(newCov)
+
+            N[ell_jump:] = nbin
+            dtilde_the = np.concatenate([dtilde_the, dtilde_the_high])
+            d_obs = np.concatenate([d_obs, d_obs_high])
+            dtilde_mix = np.concatenate([dtilde_mix, dtilde_mix_high])
+
+
+        return np.sum((2 * ells + 1) * self.fsky * ((dtilde_mix / dtilde_the) + np.log(dtilde_the / d_obs) - N) + np.power(eps_l, 2))
+
+    # compute the jacobian with respect to the epsilons for the minimization
+    def jac(self, eps_l, ells, Cov_observ, Cov_theory, T_Rerr, Cov_observ_high=None, Cov_theory_high=None, T_Rerr_high=None):
+
+        # find the  #redshift bins X #probes from the covariance matrix
+        nbin = Cov_observ.shape[1]
+        # find the multipole with the jump
+        ell_jump = Cov_observ.shape[0]
+
+        shifted_Cov = Cov_theory + eps_l[:ell_jump, None, None] * T_Rerr
+        dtilde_the = np.linalg.det(shifted_Cov)
+        inv_shifted_Cov = np.linalg.inv(shifted_Cov)
+        dprime_the = dtilde_the * np.trace(
+            np.matmul(inv_shifted_Cov, T_Rerr), axis1=1, axis2=2
+        )
+
+        d_obs = np.linalg.det(Cov_observ)
+
+        dtilde_mix = np.zeros_like(dtilde_the)
+        dprime_mix = np.zeros_like(dtilde_the)
+        for i in range(nbin):
+            newCov = np.copy(shifted_Cov)
+            newCov[:, i] = Cov_observ[:, :, i]
+            dnewCov = np.linalg.det(newCov)
+            dtilde_mix += dnewCov
+
+            newCovprime = np.copy(T_Rerr)
+            newCovprime[:, i] = 0
+            inv_newCov = np.linalg.inv(newCov)
+            dprime_mix += dnewCov * np.trace(
+                np.matmul(inv_newCov, newCovprime), axis1=1, axis2=2
+            )
+
+        # if the probe is 3x2pt calculate the part with no cross correlation
+        if "WL_GCph_XC" in self.probe:
+
+            nbin = Cov_observ_high.shape[1]
+
+            shifted_Cov_high = Cov_theory_high + eps_l[ell_jump:, None, None] * T_Rerr_high
+            dtilde_the_high = np.linalg.det(shifted_Cov_high)
+            inv_shifted_Cov_high = np.linalg.inv(shifted_Cov_high)
+            dprime_the_high = dtilde_the_high * np.trace(
+                np.matmul(inv_shifted_Cov_high, T_Rerr_high), axis1=1, axis2=2
+            )
+
+            d_obs_high = np.linalg.det(Cov_observ_high)
+
+            dtilde_mix_high = np.zeros_like(dtilde_the_high)
+            dprime_mix_high = np.zeros_like(dtilde_the_high)
+            for i in range(nbin):
+                newCov = np.copy(shifted_Cov_high)
+                newCov[:, i] = Cov_observ_high[:, :, i]
+                dnewCov_high = np.linalg.det(newCov)
+                dtilde_mix_high += dnewCov_high
+
+                newCovprime_high = np.copy(T_Rerr_high)
+                newCovprime_high[:, i] = 0
+                inv_newCov = np.linalg.inv(newCov)
+                dprime_mix_high += dnewCov_high * np.trace(
+                    np.matmul(inv_newCov, newCovprime_high), axis1=1, axis2=2
+                )
+
+            dtilde_the = np.concatenate([dtilde_the, dtilde_the_high])
+            dprime_the = np.concatenate([dprime_the, dprime_the_high])
+            d_obs = np.concatenate([d_obs, d_obs_high])
+            dtilde_mix = np.concatenate([dtilde_mix, dtilde_mix_high])
+            dprime_mix = np.concatenate([dprime_mix, dprime_mix_high])
+
+        return (2 * ells + 1) * self.fsky * ((dprime_mix + dprime_the) / dtilde_the - (dtilde_mix * dprime_the) / np.power(dtilde_the, 2)) + 2 * eps_l
 
     def forge_norm(self):
         """forge normalization calculation
