@@ -1,0 +1,16 @@
+name: photo_fofR_310
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - mpi4py
+  - pip:
+    - cython
+    - numpy>=1.17,<=1.23
+    - scipy>=1.3
+    - jupyter>=1.0
+    - matplotlib>=3.1
+    - getdist>=1.1.3
+    - pyyaml
