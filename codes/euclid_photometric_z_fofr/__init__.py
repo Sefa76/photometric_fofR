@@ -6,6 +6,8 @@
 # cosmological probes)
 # (adapted from euclid_lensing likelihood)
 # edited by Lena Rathmann in 2021
+import logging
+logging.captureWarnings(False)  #Set to true, to capture and suppress all python warnings
 
 from montepython.likelihood_class import Likelihood
 
@@ -385,8 +387,8 @@ class euclid_photometric_z_fofr(Likelihood):
         index_pknn = np.array(np.where((k> kmin_in_inv_Mpc) & (k<kmax_in_inv_Mpc))).transpose()
 
         for index_l, index_z in index_pknn:
-            pk_m_nl[index_l, index_z] = Pk_nl(self.z[index_z], k[index_l,index_z])[0]
-            pk_m_l[index_l, index_z] = Pk_l(self.z[index_z], k[index_l,index_z])[0]
+            pk_m_nl[index_l, index_z] = Pk_nl(self.z[index_z], k[index_l,index_z]).item()
+            pk_m_l[index_l, index_z] = Pk_l(self.z[index_z], k[index_l,index_z]).item()
 
         Pk = pk_m_nl
 
@@ -615,7 +617,7 @@ class euclid_photometric_z_fofr(Likelihood):
             k_power = []
             for iz, zi in enumerate(z_long):
                 for ik, ki in enumerate(k_cut):
-                    logBoostk[ik, iz] = np.log(fofR_boost(ki, zi))[0]
+                    logBoostk[ik, iz] = np.log(fofR_boost(ki, zi)).item()
                 #fix boost at highest k to emulator value
                 popt, _= curve_fit(lambda x,gamma : logBoostk[-1,iz]+gamma*(x-logk_cut[-1]),logk_cut,logBoostk[:,iz])
                 k_power.append(popt[0])
@@ -626,7 +628,7 @@ class euclid_photometric_z_fofr(Likelihood):
             z_power = []
             for ik, ki in enumerate(k_long):
                 for iz, zi in enumerate(z_cut):
-                    logBoostz[ik,iz] = np.log(fofR_boost(ki,zi))[0]
+                    logBoostz[ik,iz] = np.log(fofR_boost(ki,zi)).item()
                 #fix boost at highest z to emulator value
                 popt, _= curve_fit(lambda x,gamma : logBoostz[ik,-1]+gamma*(x-logz_cut[-1]),logz_cut,logBoostz[ik,:])
                 z_power.append(popt[0])
@@ -734,7 +736,7 @@ class euclid_photometric_z_fofr(Likelihood):
         elif self.scale_dependent_f ==True:
             D_z =np.ones((self.lbin,self.nzmax), 'float64')
             for index_l, index_z in index_pknn:
-                D_z[index_l,index_z] = np.sqrt(Pk_l(self.z[index_z],k[index_l,index_z])/Pk_l(0,k[index_l,index_z]))
+                D_z[index_l,index_z] = np.sqrt(Pk_l(self.z[index_z],k[index_l,index_z].item()) / Pk_l(0,k[index_l,index_z])).item()
 
         if self.use_fofR and self.use_MGGrowth:
             D_z_boost = np.ones((self.lbin,self.nzmax), 'float64')
