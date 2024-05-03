@@ -1,0 +1,60 @@
+io:
+  dir: output/pro_fofR_forge
+  jobname: pro_fofR_forge
+  overwrite_dir: false
+  snapshot_interval: 60.0
+  write: true
+kernel:
+  conf: ../montepython_public/default.conf
+  debug: false
+  param: input/montepython/HS6WLoptbarforgeemantis/log.param
+  path: ../montepython_public/montepython/
+  type: montepython
+profile:
+  chi2_tolerance: null
+  confidence_levels:
+  - 0.68
+  - 0.95
+  detailed_plot: false
+  max_iterations: 20
+  minutes_per_iteration: null
+  optimiser: simulated annealing
+  parameter: lgfR0
+  plot_Delta_chi2: false
+  plot_profile: true
+  plot_schedule: true
+  repetitions: 1
+  start_bin_fraction: 0.1
+  start_from_covmat: null
+  start_from_mcmc: input/montepython/HS6WLoptbarforgeemantis/Getdist/2023-12-24_500000_
+  start_from_position: null
+  start_from_profile: null
+  step_size_adaptive_initial: 0.1
+  step_size_adaptive_interval:
+  - 0.19
+  - 0.21
+  step_size_adaptive_multiplier: 0.3
+  step_size_range:
+  - 0.1
+  - null
+  step_size_schedule: adaptive
+  steps_per_iteration: 500
+  temperature_range:
+  - 0.5
+  - 0.005
+  temperature_schedule: exponential
+  values:
+  - 4.84104
+  - 5.24195
+  - 5.30103
+  - 5.388
+  - 5.53854
+  - 5.848
+  - 6.0827
+  - 6.24566
+  - 6.41913
+run:
+  jobtype: profile
+  mode: mpi
+  num_processes: 10
+  numpy_random_seed: null
