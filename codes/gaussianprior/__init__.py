@@ -10,6 +10,7 @@ class gaussianprior(Likelihood_prior):
     def loglkl(self, cosmo, data):
         ns = cosmo.n_s()
         omegab = cosmo.omega_b()
-        loglkl = -0.5 * (ns - self.ns) ** 2 / (self.sigma_ns ** 2) -0.5 * (omegab - self.omegab) ** 2 / (self.sigma_omegab ** 2)
+        log10Mc = cosmo.log10Mc()
+        loglkl = self.ns_flag * (-0.5 * (ns - self.ns) ** 2 / (self.sigma_ns ** 2)) + self.omegab_flag * (-0.5 * (omegab - self.omegab) ** 2 / (self.sigma_omegab ** 2)) + self.log10Mc_flag * (-0.5 * (log10Mc - self.log10Mc) ** 2 / (self.sigma_log10Mc ** 2))
         return loglkl
         return loglkl
