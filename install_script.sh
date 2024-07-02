@@ -12,14 +12,6 @@ then
     return 0
 fi
 
-read -p "Do you want to use uv as a faster wrapper for pip installations? Yes/No? " response
-if [[ $response =~ ^(Y|y|Yes|yes)$ ]]
-then
-pip install uv
-pipi="uv pip"
-else
-pipi="pip"
-fi
 
 echo "This will create and activate the conda environment named photometric_fofR."
 echo "** Please run this script as 'source install_script.sh' to allow for correct environment installation from within the terminal. **"
@@ -41,12 +33,23 @@ then
 else
     # The user did not confirm, abort the operation
     echo "Creation of conda environment aborted. Install the following packages within your preferred python environment."
-    echo "Attempting pip installation"
-    read -p ">> Do you want to install the requirements.txt file with pip? Yes/No? " response
-    if [[ $response =~ ^(Y|y|Yes|yes)$ ]]
-    then
-    $pipi install -U -r requirements.txt
-    fi
+fi
+    
+echo "Attempting pip installation"
+
+read -p "Do you want to use uv as a faster wrapper for pip installations? Yes/No? " response
+if [[ $response =~ ^(Y|y|Yes|yes)$ ]]
+then
+pip install uv
+pipi="uv pip"
+else
+pipi="pip"
+fi
+    
+read -p ">> Do you want to install the requirements.txt file with pip? Yes/No? " response
+if [[ $response =~ ^(Y|y|Yes|yes)$ ]]
+then
+$pipi install -U -r requirements.txt
 fi
 
 echo "** Moving one directory level above.."
@@ -81,7 +84,6 @@ if [[ ! $response =~ ^(Y|y|Yes|yes)$ ]]
 then
     # The user did not confirm, abort the operation
     echo "Operation aborted."
-    return 0
 fi
 
 
