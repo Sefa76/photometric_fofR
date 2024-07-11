@@ -1,0 +1,57 @@
+#-----CLASS v3.2.0 (branch: master, hash: aa92943e4ab86b56970953589b4897adf2bd0f99)-----
+
+#------Experiments to test (separated with commas)-----
+
+data.experiments=['euclid_photometric_z_fofr', 'gaussianprior']
+
+#------ Parameter list -------
+
+# data.parameters[class name] = [mean, min, max, 1-sigma, scale, role]
+# - if min max irrelevant, put to -1 or None (if you want a boundary of -1, use -1.0)
+# - if fixed, put 1-sigma to 0
+# - if scale irrelevant, put to 1, otherwise to the appropriate factor
+# - role is either 'cosmo', 'nuisance' or 'derived'
+
+data.over_sampling=[1,1]
+
+# Cosmological parameter list
+data.parameters['omega_b']         = [0.022445      , 0.01,  0.04,    0.0002315,   1, 'cosmo']
+data.parameters['omega_cdm']       = [0.1205579307  , 0.005,  1.0,    0.0002315,   1, 'cosmo']
+data.parameters['H0']              = [67.0   ,   10.,  150,             0.14874,   1, 'cosmo']
+data.parameters['ln10^{10}A_s']    = [3.05685,   2.7,  3.3,                0.01,   1, 'cosmo']
+data.parameters['n_s']             = [0.96   ,   0.94,  0.98,       0.0005568,   1, 'cosmo']
+
+#nuisance
+data.parameters['lgfR0']           = [ 5.30103, 4, 7, 0.018739311, 1, 'nuisance']
+data.parameters['aIA']             = [ 1.71,  	 0,   12.1,  0.01, 1, 'nuisance']
+data.parameters['etaIA']           = [-0.41,  -7.0,   6.17,  0.01, 1, 'nuisance']
+data.parameters['betaIA']          = [    0,   0.63,   5.0,     0, 1, 'nuisance']
+
+#baryonic feedback
+data.parameters['log10Mc']         = [13.32, 11.0, 15.0, 0.1, 1, 'nuisance']
+data.parameters['thej']            = [4.235, 2.0, 8.0, 0.1, 1, 'nuisance']
+data.parameters['deta']            = [0.14, 0.05, 0.4, 0, 1, 'nuisance']
+
+#derived_lkl
+data.parameters['sigma8_fofR']     = [0,      -1, -1, 0,     1, 'derived_lkl']
+
+#Fixed parameter list
+data.cosmo_arguments['N_ncdm'] = 1
+data.cosmo_arguments['YHe'] = 0.2454006
+data.cosmo_arguments['reio_parametrization'] = 'reio_none'
+data.cosmo_arguments['N_ur'] = 2.0313333333333334
+data.cosmo_arguments['T_ncdm'] = 0.7163687246184776
+data.cosmo_arguments['Omega_ncdm'] = 0.0014364583758518807
+
+data.cosmo_arguments['k_per_decade_for_pk'] = 50
+data.cosmo_arguments['k_per_decade_for_bao'] = 50
+data.cosmo_arguments['non linear'] = 'halofit'
+data.cosmo_arguments['nonlinear_min_k_max'] = 80.
+
+#------ Mcmc parameters ----
+# Number of steps taken, by default (overwritten by the -N command)
+data.N=10
+# Number of accepted steps before writing to file the chain. Larger means less
+# access to disc, but this is not so much time consuming.
+data.write_step=5
+
