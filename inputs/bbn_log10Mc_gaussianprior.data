@@ -1,0 +1,9 @@
+gaussianprior.ns            = 0.96
+gaussianprior.sigma_ns      = 0.004
+gaussianprior.ns_flag       = 1
+gaussianprior.omegab        = 0.022445
+gaussianprior.sigma_omegab  = 0.00036
+gaussianprior.omegab_flag   = 1
+gaussianprior.log10Mc       = 13.32
+gaussianprior.sigma_log10Mc = 0.2
+gaussianprior.log10Mc_flag  = 1
